@@ -25,9 +25,18 @@ Gdy dziecko nic nie robi przez chwilę, pojawia się palec 👇 pokazujący, co 
 
 ## Panel rodzica
 
-**Przytrzymaj ⚙️ przez 1,5 sekundy.** Panel pokazuje gwiazdki, odznaki, wyniki testów i liczbę usłyszanych słówek. Można tam zwolnić głos, sprawdzić, czy telefon ma polski i angielski głos, oraz wyczyścić postęp.
+**Przytrzymaj ⚙️ przez 1,5 sekundy.** Panel pokazuje gwiazdki, odznaki, wyniki testów i liczbę usłyszanych słówek. Można tam przełączyć głos (nagrany lub telefonu), sprawdzić głos i wyczyścić postęp.
 
-Jeśli gra nie mówi po polsku, trzeba doinstalować głos w telefonie: *Ustawienia → Ułatwienia dostępu → Zamiana tekstu na mowę*. Na Androidzie służy do tego Google Text-to-Speech, a na iPhonie głosy Siri.
+## Głos
+
+Gra mówi z **gotowych nagrań** zapisanych w `audio/voice-pack.js`. Dzięki temu działa w każdym telefonie, w aplikacji Claude i bez internetu, bez żadnych ustawień. W panelu rodzica można przełączyć na głos telefonu. Brzmi ładniej, ale nie działa w każdej aplikacji.
+
+Wszystkie teksty, które gra mówi, są w `js/phrases.js`. Po zmianie tekstów trzeba wygenerować nagrania na nowo:
+
+```
+pip install espeakng-loader      # silnik mowy offline (wymaga też node i ffmpeg)
+python3 tools/make_voice.py
+```
 
 ## Uruchomienie
 
@@ -43,5 +52,8 @@ Postęp zapisuje się tylko na tym urządzeniu (localStorage).
 - `index.html`: ekrany gry
 - `css/style.css`: wygląd
 - `js/data.js`: treści (postacie, zwierzątka, pokoje, słówka). Tu najłatwiej dodać nowe słowa lub pokój.
+- `js/phrases.js`: wszystko, co gra mówi
+- `audio/voice-pack.js`: nagrania głosu (generowane)
+- `tools/`: generator nagrań
 - `js/game.js`: logika gry
 - `sw.js`, `manifest.webmanifest`, `icons/`: instalacja na telefonie i tryb offline

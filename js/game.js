@@ -28,7 +28,7 @@
 
   /* ---------- zapis postępu ---------- */
   const SAVE_KEY = 'mojDomek.v1';
-  const fresh = () => ({ character: null, pets: [], room: 'kitchen', rooms: {}, badges: [], fedAt: 0, tests: [], heard: {}, slowVoice: false, introDone: false, tips: {} });
+  const fresh = () => ({ character: null, pets: [], room: 'kitchen', rooms: {}, badges: [], fedAt: 0, tests: [], heard: {}, deviceVoice: false, introDone: false, tips: {} });
   let S = load();
   function load() {
     try { const raw = localStorage.getItem(SAVE_KEY); if (raw) return Object.assign(fresh(), JSON.parse(raw)); } catch (e) { /* brak zapisu */ }
@@ -40,67 +40,138 @@
   const isHungry = () => S.pets.length > 0 && Date.now() - S.fedAt > 4 * 3600e3;
   function heard(en) { S.heard[en] = (S.heard[en] || 0) + 1; save(); }
 
-  /* ---------- głos ---------- */
+  /* ---------- dźwięk: wspólny AudioContext ---------- */
+  let actx = null;
+  function audio() {
+    if (!actx) { const A = window.AudioContext || window.webkitAudioContext; if (!A) return null; actx = new A(); }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  // iPhone w trybie cichym wycisza Web Audio; grający cichy <audio> przełącza telefon na tryb odtwarzania.
+  const SILENT_WAV = (() => {
+    const n = 800, b = new DataView(new ArrayBuffer(44 + n * 2));
+    const w = (o, s) => [...s].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+    w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true);
+    b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, 8000, true); b.setUint32(28, 16000, true);
+    b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
+    let s = ''; new Uint8Array(b.buffer).forEach(x => { s += String.fromCharCode(x); });
+    return 'data:audio/wav;base64,' + btoa(s);
+  })();
+
+  /* ---------- głos: nagrania z audio/voice-pack.js, zapasowo syntezator telefonu ---------- */
   const Voice = (() => {
     const synth = window.speechSynthesis;
-    let pl = null, en = null, token = 0, bubbleTimer;
+    const pack = () => window.VOICE_PACK || {};
+    const buffers = new Map();
+    let plV = null, enV = null, token = 0, bubbleTimer, src = null, last = null, keepAlive = null;
+    window.__voiceMissing = [];
+
     function choose() {
       if (!synth) return;
       const vs = synth.getVoices();
       const by = re => vs.filter(v => re.test(v.lang.replace('_', '-')));
       const pref = list => list.find(v => /google|natural|enhanced|premium|siri/i.test(v.name)) || list[0] || null;
-      pl = pref(by(/^pl/i));
-      en = pref(by(/^en-(US|GB)/i)) || pref(by(/^en/i));
+      plV = pref(by(/^pl/i));
+      enV = pref(by(/^en-(US|GB)/i)) || pref(by(/^en/i));
     }
     if (synth) { choose(); synth.addEventListener?.('voiceschanged', choose); }
-    const estimate = parts => parts.reduce((t, [, s]) => t + s.length * 75 + 250, 300);
+    const estimate = parts => parts.reduce((t, [, s]) => t + s.length * 70 + 250, 300);
 
     function bubble(parts) {
       const b = $('#bubble');
-      b.innerHTML = '';
-      parts.forEach(([lang, text]) => b.append(lang === 'en' ? h('b', {}, text + ' ') : text + ' '));
+      b.replaceChildren(...parts.map(([lang, text]) => (lang === 'en' ? h('b', {}, text + ' ') : text + ' ')));
       b.hidden = false;
     }
     function hideBubble(my) { clearTimeout(bubbleTimer); bubbleTimer = setTimeout(() => { if (my === token) $('#bubble').hidden = true; }, 1400); }
 
-    function say(parts) {
-      const my = ++token;
-      bubble(parts);
-      if (!synth) return sleep(estimate(parts)).then(() => hideBubble(my));
-      synth.cancel();
+    function decode(lang, text) {
+      const k = lang + '|' + text;
+      if (buffers.has(k)) return buffers.get(k);
+      const b64 = pack()[k], a = audio();
+      if (!b64 || !a) return Promise.resolve(null);
+      const bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const p = new Promise((res, rej) => a.decodeAudioData(bytes.buffer, res, rej)).catch(() => null);
+      buffers.set(k, p);
+      if (buffers.size > 120) buffers.delete(buffers.keys().next().value);
+      return p;
+    }
+    function play(buf, my) {
+      return new Promise(res => {
+        const a = audio();
+        if (my !== token || !buf || !a) return res();
+        const s = a.createBufferSource();
+        s.buffer = buf;
+        s.connect(a.destination);
+        src = s;
+        const done = () => { clearTimeout(t); if (src === s) src = null; res(); };
+        const t = setTimeout(done, buf.duration * 1000 + 800);
+        s.onended = done;
+        s.start();
+      });
+    }
+    function device(parts, my) {
+      if (!synth) return sleep(estimate(parts));
       return new Promise(resolve => {
         let left = parts.length, finished = false;
-        const finish = () => { if (finished) return; finished = true; clearTimeout(safety); hideBubble(my); resolve(); };
+        const finish = () => { if (finished) return; finished = true; clearTimeout(safety); resolve(); };
         const safety = setTimeout(finish, estimate(parts) + 3000);
         parts.forEach(([lang, text]) => {
           const u = new SpeechSynthesisUtterance(text);
           u.lang = lang === 'en' ? 'en-US' : 'pl-PL';
-          const v = lang === 'en' ? en : pl;
+          const v = lang === 'en' ? enV : plV;
           if (v) { u.voice = v; u.lang = v.lang; }
-          u.rate = (lang === 'en' ? 0.8 : 0.95) * (S.slowVoice ? 0.8 : 1);
+          u.rate = lang === 'en' ? 0.8 : 0.95;
           u.pitch = 1.1;
           u.onend = u.onerror = () => { if (--left <= 0) finish(); };
-          synth.speak(u);
+          if (my === token) synth.speak(u);
         });
       });
     }
-    function stop() { token++; if (synth) synth.cancel(); $('#bubble').hidden = true; }
-    function unlock() { if (!synth) return; const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); }
-    return { say, stop, unlock, info: () => ({ supported: !!synth, pl: pl && pl.name, en: en && en.name }) };
+    async function clips(parts, my) {
+      const bufs = parts.map(([l, t]) => decode(l, t));
+      for (let i = 0; i < parts.length; i++) {
+        if (my !== token) return;
+        const buf = await bufs[i];
+        if (buf) { await play(buf, my); await sleep(90); continue; }
+        window.__voiceMissing.push(parts[i].join('|'));
+        await device([parts[i]], my);
+      }
+    }
+    const useDevice = () => S.deviceVoice && synth && plV && enV;
+
+    function say(parts) {
+      stopSound();
+      const my = ++token;
+      last = parts;
+      bubble(parts);
+      return (useDevice() ? device(parts, my) : clips(parts, my)).then(() => hideBubble(my));
+    }
+    function stopSound() {
+      if (src) { try { src.stop(); } catch (e) { /* już zatrzymane */ } src = null; }
+      if (synth) synth.cancel();
+    }
+    function stop() { token++; stopSound(); $('#bubble').hidden = true; }
+    function unlock() {
+      const a = audio();
+      if (a) { const s = a.createBufferSource(); s.buffer = a.createBuffer(1, 1, 22050); s.connect(a.destination); s.start(); }
+      try {
+        if (!keepAlive) { keepAlive = new Audio(SILENT_WAV); keepAlive.loop = true; }
+        keepAlive.play().catch(() => {});
+      } catch (e) { /* bez HTMLAudio */ }
+    }
+    return {
+      say, stop, unlock, repeat: () => last && say(last),
+      info: () => ({ recorded: Object.keys(pack()).length, device: !!(synth && plV && enV), pl: plV && plV.name, en: enV && enV.name }),
+    };
   })();
   const say = parts => Voice.say(parts);
-  const sayPl = text => Voice.say([['pl', text]]);
+  $('#bubble').addEventListener('click', () => Voice.repeat());
 
   /* ---------- dźwięki ---------- */
   const Sfx = (() => {
-    let ctx;
-    function c() {
-      if (!ctx) { const A = window.AudioContext || window.webkitAudioContext; if (!A) return null; ctx = new A(); }
-      if (ctx.state === 'suspended') ctx.resume();
-      return ctx;
-    }
     function tone(f, t0, d, type = 'sine', g = 0.14) {
-      const a = c(); if (!a) return;
+      const a = audio(); if (!a) return;
       const o = a.createOscillator(), v = a.createGain(), t = a.currentTime + t0;
       o.type = type; o.frequency.value = f;
       v.gain.setValueAtTime(0.0001, t);
@@ -118,8 +189,7 @@
     };
   })();
 
-  const PRAISE = [[['pl', 'Brawo!']], [['en', 'Great job!']], [['pl', 'Super!']], [['en', 'Well done!']], [['pl', 'Świetnie!']], [['en', 'Excellent!']], [['pl', 'Ekstra!']]];
-  const praise = () => pick(PRAISE);
+  const praise = () => pick(T.praise);
 
   /* ---------- efekty ---------- */
   function confetti(n = 70) {
@@ -200,7 +270,7 @@
         $$('.tile', grid).forEach(t => t.classList.toggle('on', t === b));
         ok.hidden = false;
         Sfx.pop(); boing(b);
-        say([['pl', cap(c.pl) + '!'], ['en', c.en]]);
+        say(T.character(c));
       };
       return b;
     }));
@@ -208,7 +278,7 @@
     const back = $('#charBack');
     back.hidden = first || !S.character;
     back.onclick = () => { Sfx.pop(); enterHome(); };
-    sayPl(first ? 'Cześć! Wybierz swoją postać. Dotknij tej, którą lubisz najbardziej.' : 'Wybierz postać.');
+    say(first ? T.chooseFirst : T.choose);
   }
 
   /* ---------- dom i chodzenie ---------- */
@@ -223,19 +293,14 @@
     lastAct = Date.now();
     if (!S.introDone) {
       S.introDone = true; save();
-      say([
-        ['pl', 'To jest twój domek! Jesteśmy w kuchni. Po angielsku:'], ['en', 'kitchen.'],
-        ['pl', 'Dotknij podłogi, żeby chodzić. Dotknij szafki, żeby ją otworzyć.'],
-        ['pl', 'Zbierz trzy gwiazdki, a potem sowa zrobi ci test. Za test dostaniesz prezent: zwierzątko!'],
-      ]);
+      say(T.intro);
     } else {
       greetRoom();
     }
   }
   function greetRoom() {
     const r = cur.room;
-    const extra = isHungry() ? [['pl', 'Twoje zwierzątko jest głodne!']] : [];
-    say([['pl', cap(r.pl) + '. Po angielsku:'], ['en', r.en + '.'], ...extra]);
+    say([...T.room(r), ...(isHungry() ? T.hungryShort : [])]);
   }
 
   function box(x, y, w, hgt) {
@@ -396,15 +461,15 @@
     const room = cur.room, rs = roomState(room.id), idx = ROOMS.indexOf(room);
     const m = id => MASCOTS.find(x => x.id === id);
     if (isHungry()) {
-      if (room.id === 'kitchen') return { x: 10, top: 34, say: 'Twoje zwierzątko jest głodne! Dotknij miski.' };
-      return { x: 6, top: 69, say: 'Twoje zwierzątko jest głodne. Idź do kuchni, do miski!' };
+      if (room.id === 'kitchen') return { x: 10, top: 34, say: T.goal.hungryHere };
+      return { x: 6, top: 69, say: T.goal.hungryGo };
     }
     const un = room.objects.find(o => !rs.explored.includes(o.id));
-    if (un) return { x: un.x, top: un.y + un.h, say: 'Dotknij tutaj, żeby otworzyć!' };
-    if (!rs.stars[1]) return { x: m('parrot').x, top: m('parrot').y + 15, say: 'Idź do papugi! Papuga mówi po angielsku.' };
-    if (!rs.stars[2]) return { x: m('octo').x, top: m('octo').y + 15, say: 'Idź do ośmiornicy! Ośmiornica uczy liczyć.' };
-    if (!S.badges.includes(room.id)) return { x: m('owl').x, top: m('owl').y + 16, say: 'Idź do sowy! Zrób test i zdobądź odznakę!' };
-    if (idx < ROOMS.length - 1) return { x: 114, top: 69, say: 'Przejdź przez drzwi do następnego pokoju!' };
+    if (un) return { x: un.x, top: un.y + un.h, say: T.goal.open };
+    if (!rs.stars[1]) return { x: m('parrot').x, top: m('parrot').y + 15, say: T.goal.parrot };
+    if (!rs.stars[2]) return { x: m('octo').x, top: m('octo').y + 15, say: T.goal.octo };
+    if (!S.badges.includes(room.id)) return { x: m('owl').x, top: m('owl').y + 16, say: T.goal.owl };
+    if (idx < ROOMS.length - 1) return { x: 114, top: 69, say: T.goal.door };
     return null;
   }
   function showPointer(g) {
@@ -425,7 +490,7 @@
       if (!g) return;
       showPointer(g);
       lastHintSay = Date.now();
-      sayPl(g.say);
+      say(g.say);
     }, delay);
   }
   setInterval(() => {
@@ -434,14 +499,12 @@
     const g = nextGoal();
     if (!g) return;
     showPointer(g);
-    if (Date.now() - lastHintSay > 35000) { lastHintSay = Date.now(); sayPl(g.say); }
+    if (Date.now() - lastHintSay > 35000) { lastHintSay = Date.now(); say(g.say); }
   }, 1000);
 
   /* ---------- pasek u góry ---------- */
   const STAR_SLOTS = [
-    { icon: '🔍', say: 'Otwórz wszystkie szafki w tym pokoju.' },
-    { icon: '🦜', say: 'Pobaw się z papugą.' },
-    { icon: '🐙', say: 'Pobaw się z ośmiornicą.' },
+    { icon: '🔍' }, { icon: '🦜' }, { icon: '🐙' },
   ];
   function updateHud(popIdx = -1) {
     $('#meBtn').textContent = S.character || '🙂';
@@ -449,7 +512,7 @@
     $('#stars').replaceChildren(...STAR_SLOTS.map((s, i) => {
       const b = h('button', { class: 'star-slot' + (rs.stars[i] ? ' got' : '') + (i === popIdx ? ' boing' : ''), 'aria-label': 'gwiazdka ' + (i + 1) },
         rs.stars[i] ? '⭐' : s.icon);
-      b.onclick = () => { Sfx.pop(); sayPl(rs.stars[i] ? 'Ta gwiazdka jest już twoja!' : s.say); };
+      b.onclick = () => { Sfx.pop(); say(rs.stars[i] ? T.starHave : T.starSlots[i]); };
       return b;
     }));
     $('#roomIcon').textContent = cur.room.icon;
@@ -466,7 +529,6 @@
     return true;
   }
   const starsCount = () => roomState(cur.room.id).stars.filter(Boolean).length;
-  const STARS_WORD = ['zero gwiazdek', 'jedną gwiazdkę', 'dwie gwiazdki', 'trzy gwiazdki'];
 
   /* ---------- zwierzątka ---------- */
   function updateNeeds() {
@@ -480,10 +542,10 @@
     const p = PET_BY_ID[S.pets[i]];
     Sfx.pop(); boing(el);
     if (isHungry()) {
-      say([['pl', `${cap(p.pl)} jest ${p.f ? 'głodna' : 'głodny'}! Nakarm ${p.f ? 'ją' : 'go'} przy misce w kuchni.`]]);
+      say(T.petHungry(p));
     } else {
       hearts(el);
-      say([['pl', cap(p.pl) + '. Po angielsku:'], ['en', p.en + '.'], ['en', 'I love you!']]);
+      say(T.petLove(p));
     }
   }
 
@@ -493,7 +555,7 @@
     if (el.classList.contains('locked')) {
       Sfx.locked();
       const prev = ROOMS[ROOMS.indexOf(target) - 1];
-      sayPl(`Te drzwi są zamknięte. Zdobądź odznakę ${prev.gen} u sowy, a się otworzą!`);
+      say(T.doorLocked(prev));
       return;
     }
     Sfx.pop();
@@ -515,13 +577,13 @@
     const rs = roomState(cur.room.id);
     if (!rs.explored.includes(o.id)) { rs.explored.push(o.id); save(); $('.sparkle', el)?.remove(); }
     const s = openSheet({ cls: 'sheet-open', onClose: () => { el.classList.remove('opened'); afterExplore(); } });
-    const sayObj = () => say([['pl', cap(o.pl) + '. Po angielsku:'], ['en', o.en + '.'], ['en', o.en + '!']]);
+    const sayObj = () => say(T.object(o));
     s.setRepeat(sayObj);
     const items = h('div', { class: 'items' });
     o.items.forEach(([e, pl, en], i) => {
       const b = h('button', { class: 'item pop', style: `animation-delay:${0.25 + i * 0.12}s`, 'aria-label': pl },
         h('span', { class: 'item-emoji' }, e), h('span', { class: 'item-en' }, en));
-      b.onclick = () => { Sfx.pop(); boing(b); heard(en); say([['pl', cap(pl) + '.'], ['en', en + '.']]); };
+      b.onclick = () => { Sfx.pop(); boing(b); heard(en); say(T.item(pl, en)); };
       items.append(b);
     });
     s.body.append(h('div', { class: 'obj-head' }, artNode(o, 'obj-mini'), h('div', { class: 'word' }, h('b', {}, o.en), h('small', {}, o.pl))), items);
@@ -529,14 +591,14 @@
     sayObj().then(() => {
       if (s.closed || S.tips.items) return;
       S.tips.items = true; save();
-      sayPl('Dotknij rzeczy w środku, a powiem, jak się nazywają!');
+      say(T.tipItems);
     });
   }
   function afterExplore() {
     const rs = roomState(cur.room.id);
     if (rs.explored.length >= cur.room.objects.length && grantStar(0)) {
       Sfx.good(); confetti(40);
-      say([['pl', 'Brawo! Wszystko otwarte! Masz gwiazdkę!'], ['en', 'Star!']]).then(() => announceNext(200));
+      say(T.allOpened).then(() => announceNext(200));
     }
   }
 
@@ -552,11 +614,11 @@
     const others = shuffle(pool.filter(w => w[2] !== t[2])).slice(0, 2);
     return {
       kind: 'pick',
-      say: [['pl', 'Pokaż:'], ['en', t[2] + '.']],
-      okSay: [['en', t[2] + '!']],
+      say: T.findAsk(t[2]),
+      okSay: T.findOk(t[2]),
       choices: shuffle([t, ...others]).map(w => ({
         ok: w === t, node: () => h('span', { class: 'choice-emoji' }, w[0]),
-        wrongSay: [['pl', 'To jest'], ['en', w[2] + '.']],
+        wrongSay: T.thisIs(w[2]),
       })),
       after: () => heard(t[2]),
     };
@@ -576,7 +638,7 @@
     for (let i = 0; i < items.length; i++) {
       if (s.closed) return;
       items[i].classList.add('lit');
-      await sayPl(PL_NUM[i + 1]);
+      await say(T.say1(i + 1));
     }
   }
 
@@ -584,11 +646,11 @@
     const n = rint(lo, hi), e = pick(room.mathEmoji);
     return {
       kind: 'pick',
-      say: [['pl', 'Policz! Ile ich jest?']],
+      say: T.howManyAsk,
       show: () => countRow(n, e),
-      okSay: [['pl', cap(PL_NUM[n]) + '! Po angielsku:'], ['en', EN_NUM[n] + '.']],
+      okSay: T.number(n),
       teach: countAlong,
-      choices: numberChoices(n, 1, 10).map(c => ({ ok: c === n, node: () => h('span', { class: 'digit' }, c), wrongSay: [['pl', 'To nie ' + PL_NUM[c] + '.']] })),
+      choices: numberChoices(n, 1, 10).map(c => ({ ok: c === n, node: () => h('span', { class: 'digit' }, c), wrongSay: T.notNumber(c) })),
     };
   }
   function qCompare(room) {
@@ -598,20 +660,20 @@
     const win = more ? Math.max(a, b) : Math.min(a, b), lose = a + b - win;
     return {
       kind: 'pick', wide: true,
-      say: [['pl', more ? 'Gdzie jest więcej?' : 'Gdzie jest mniej?'], ['en', more ? 'More!' : 'Less!']],
-      okSay: [['pl', `${cap(PL_NUM[win])} to ${more ? 'więcej' : 'mniej'} niż ${PL_NUM[lose]}.`]],
-      choices: [a, b].map(c => ({ ok: c === win, node: () => countRow(c, e), wrongSay: [['pl', `Tu jest ${PL_NUM[c]}.`]] })),
+      say: T.compareAsk(more),
+      okSay: T.compareOk(more, win, lose),
+      choices: [a, b].map(c => ({ ok: c === win, node: () => countRow(c, e), wrongSay: T.hereIs(c) })),
     };
   }
   function qAdd(room, max = 6) {
     const s = rint(2, max), a = rint(1, s - 1), b = s - a, e = pick(room.mathEmoji);
     return {
       kind: 'pick',
-      say: [['pl', `${cap(PL_NUM[a])} plus ${PL_NUM[b]}. Ile to razem?`]],
+      say: T.addAsk(a, b),
       show: () => h('div', { class: 'sum' }, countRow(a, e), h('span', { class: 'op' }, '+'), countRow(b, e), h('span', { class: 'op' }, '= ?')),
-      okSay: [['pl', `${cap(PL_NUM[a])} plus ${PL_NUM[b]} to ${PL_NUM[s]}!`], ['en', `${EN_NUM[a]} plus ${EN_NUM[b]} is ${EN_NUM[s]}.`]],
+      okSay: T.addOk(a, b),
       teach: countAlong,
-      choices: numberChoices(s, 1, 10).map(c => ({ ok: c === s, node: () => h('span', { class: 'digit' }, c), wrongSay: [['pl', 'To nie ' + PL_NUM[c] + '.']] })),
+      choices: numberChoices(s, 1, 10).map(c => ({ ok: c === s, node: () => h('span', { class: 'digit' }, c), wrongSay: T.notNumber(c) })),
     };
   }
   function qCount(k, first) {
@@ -619,9 +681,7 @@
     const pet = S.pets.length ? PET_BY_ID[S.pets[k % S.pets.length]] : null;
     const fruit = pet ? null : pick(FRUITS);
     const e = pet ? pet.food : fruit.e;
-    const lead = pet ? `Daj ${pet.dat} tyle ${pet.foodGen}:` : `Włóż do miski tyle ${fruit.gen}:`;
-    const tip = first && !S.tips.check ? [['pl', 'Potem dotknij zielonego ptaszka.']] : [];
-    return { kind: 'count', target, e, pet, say: [['pl', lead], ['pl', PL_NUM[target] + '.'], ['en', EN_NUM[target] + '!'], ...tip] };
+    return { kind: 'count', target, e, pet, say: T.countAsk(pet, fruit, target, first && !S.tips.check) };
   }
   function mathQ(room, k) {
     if (room.math === 'count') return qCount(k, k === 0);
@@ -655,13 +715,13 @@
           const right = $('[data-ok]', grid);
           if (mode === 'test') {
             done = true; right.classList.add('right');
-            await say([...c.wrongSay, ['pl', 'Dobra odpowiedź jest tutaj.'], ...q.okSay]);
+            await say([...c.wrongSay, ...T.rightIsHere, ...q.okSay]);
             await sleep(300);
             resolve(false);
             return;
           }
           if (wrongs >= 2) right.classList.add('hint');
-          await say([...c.wrongSay, ['pl', pick(['Spróbuj jeszcze raz!', 'Prawie! Jeszcze raz!'])]]);
+          await say([...c.wrongSay, ...pick(T.tryAgain)]);
           if (q.teach && wrongs === 1 && !s.closed) { await q.teach(stage, s); if (!s.closed) say(q.say); }
         };
         grid.append(b);
@@ -684,7 +744,7 @@
         if (done) return;
         Sfx.pop();
         if (b.parentNode === pile) { bowlIn.append(b); inBowl++; } else { pile.append(b); inBowl--; }
-        Voice.say([['pl', inBowl ? PL_NUM[inBowl] : 'pusto']]);
+        say(inBowl ? T.say1(inBowl) : T.empty);
       };
       for (let i = 0; i < total; i++) {
         const b = h('button', { class: 'food pop', style: `animation-delay:${i * 0.05}s` }, q.e);
@@ -698,21 +758,21 @@
         if (inBowl === q.target) {
           done = true; Sfx.good(); boing(bowlIn);
           if (q.pet) hearts(head);
-          await say([...praise(), ['pl', cap(PL_NUM[q.target]) + '! Po angielsku:'], ['en', EN_NUM[q.target] + '.']]);
+          await say([...praise(), ...T.number(q.target)]);
           await sleep(250);
           resolve(wrongs === 0);
           return;
         }
         wrongs++; Sfx.oops();
-        const where = inBowl === 0 ? 'Miska jest pusta.' : `W misce jest ${PL_NUM[inBowl]}. A ma być ${PL_NUM[q.target]}.`;
+        const where = inBowl === 0 ? T.bowlEmpty : T.bowlWrong(inBowl, q.target);
         if (mode === 'test') {
           done = true;
-          await say([['pl', where]]);
+          await say(where);
           await sleep(300);
           resolve(false);
           return;
         }
-        say([['pl', where], ['pl', inBowl > q.target ? 'Za dużo! Zabierz trochę.' : 'Za mało! Dodaj jeszcze.']]);
+        say([...where, ...(inBowl > q.target ? T.tooMany : T.tooFew)]);
       };
       say(q.say);
     });
@@ -739,7 +799,7 @@
     s.setRepeat(null);
     s.body.replaceChildren(h('div', { class: 'big-star spin' }, '⭐'));
     Sfx.fanfare(); confetti(isNew ? 60 : 25);
-    await say(isNew ? [['pl', 'Brawo! Masz nową gwiazdkę!'], ['en', 'Star!']] : [['pl', 'Brawo! Świetna zabawa!']]);
+    await say(isNew ? T.newStar : T.funAgain);
     if (s.closed) return;
     await sleep(500);
     if (s.closed) return;
@@ -752,7 +812,7 @@
     Sfx.pop();
     runGame({
       mode: 'practice',
-      intro: { icon: '🦜', parts: [['pl', 'Cześć! Jestem papuga. Mówię po angielsku. Posłuchaj i pokaż!']] },
+      intro: { icon: '🦜', parts: T.parrotHi },
       questions: findSet(cur.room, 5),
       onDone: (sc, t, s) => finishPractice(s, 1),
     });
@@ -760,12 +820,9 @@
   function octopus() {
     Sfx.pop();
     const room = cur.room;
-    const intro = room.math === 'count' ? 'Cześć! Jestem ośmiornica. Mam osiem rączek i lubię liczyć!'
-      : room.math === 'mix' ? 'Cześć! Policzymy razem. Gotowe?'
-        : 'Cześć! Dzisiaj dodajemy. Plus znaczy: dokładamy!';
     runGame({
       mode: 'practice',
-      intro: { icon: '🐙', parts: [['pl', intro]] },
+      intro: { icon: '🐙', parts: T.octoHi[room.math] },
       questions: Array.from({ length: 5 }, (_, k) => mathQ(room, k)),
       onDone: (sc, t, s) => finishPractice(s, 2),
     });
@@ -774,7 +831,7 @@
     Sfx.pop();
     const room = cur.room, n = starsCount();
     if (n < 3) {
-      sayPl(`Hu hu! Jestem sowa. Masz ${STARS_WORD[n]}. Zbierz trzy gwiazdki, a potem zrobimy test!`).then(() => announceNext(100));
+      say(T.owlNeed(n)).then(() => announceNext(100));
       return;
     }
     const finds = findSet(room, 3);
@@ -782,7 +839,7 @@
     for (let k = 0; k < 3; k++) questions.push(finds[k], mathQ(room, k));
     runGame({
       mode: 'test', cls: 'sheet-test',
-      intro: { icon: '🦉', parts: [['pl', 'Hu hu! Zaczynamy test. Sześć pytań. Dasz radę!']] },
+      intro: { icon: '🦉', parts: T.owlStart },
       questions,
       onDone: (score, total, s) => finishTest(room, score, total, s),
     });
@@ -802,12 +859,12 @@
       const again = h('button', { class: 'ok-btn again pop', 'aria-label': 'Jeszcze raz' }, '↻');
       again.onclick = () => { Sfx.pop(); owl(); };
       s.body.append(again);
-      say([['pl', `Prawie! Masz ${PL_NUM[score]} na ${PL_NUM[total]}. Poćwicz z papugą i ośmiornicą, i spróbuj jeszcze raz!`]]);
+      say(T.testFail(score, total));
       return;
     }
     if (S.badges.includes(room.id)) {
       Sfx.fanfare(); confetti(40);
-      await say([['pl', 'Hu hu! Znowu świetnie! Brawo!']]);
+      await say(T.testAgain);
       if (!s.closed) s.close();
       return;
     }
@@ -820,7 +877,7 @@
     const s = openSheet({ cls: 'sheet-reward', closable: false });
     s.body.replaceChildren(h('div', { class: 'medal pop' }, h('span', {}, room.icon)));
     Sfx.fanfare(); confetti(110);
-    await say([['pl', `Brawo! Masz odznakę! ${cap(room.pl)}, po angielsku:`], ['en', room.en + '!']]);
+    await say(T.badge(room));
     if (s.closed) return;
     if (S.pets.length < S.badges.length && S.pets.length < PETS.length) giftFlow(s, room);
     else finishReward(room);
@@ -829,7 +886,7 @@
   function giftFlow(s, room) {
     const gift = h('button', { class: 'gift shake', 'aria-label': 'Prezent' }, '🎁');
     s.body.replaceChildren(gift);
-    say([['pl', 'Mam dla ciebie prezent! Dotknij prezentu!']]);
+    say(T.gift);
     gift.onclick = async () => {
       gift.onclick = null;
       Sfx.fanfare(); gift.classList.remove('shake'); gift.classList.add('burst');
@@ -848,12 +905,12 @@
         chosen = p; Sfx.pop(); boing(b);
         $$('.tile', grid).forEach(t => t.classList.toggle('on', t === b));
         ok.hidden = false;
-        say([['pl', cap(p.pl) + '!'], ['en', p.en]]);
+        say(T.pet(p));
       };
       return b;
     }));
     s.body.replaceChildren(grid, ok);
-    sayPl('Wybierz zwierzątko, którym będziesz się opiekować!');
+    say(T.choosePet);
     ok.onclick = async () => {
       S.pets.push(chosen.id);
       S.fedAt = 0;
@@ -861,7 +918,7 @@
       Sfx.good();
       s.body.replaceChildren(h('div', { class: 'big-mascot bounce' }, chosen.e));
       hearts(s.body, 6);
-      await say([['pl', `Hurra! ${cap(chosen.pl)} jest teraz z tobą! ${chosen.f ? 'Ona jest głodna' : 'On jest głodny'}. Nakarm ${chosen.f ? 'ją' : 'go'} przy misce w kuchni.`]]);
+      await say(T.petChosen(chosen));
       finishReward(room);
     };
   }
@@ -871,8 +928,8 @@
     const next = ROOMS[ROOMS.indexOf(room) + 1];
     if (s && !s.closed) s.close();
     buildRoom(cur.room.id);
-    if (next) await say([['pl', `Otworzyły się drzwi do ${next.gen}! Po angielsku:`], ['en', next.en + '!']]);
-    else { confetti(120); await sayPl('Masz wszystkie odznaki w domku! Brawo, brawo, brawo!'); }
+    if (next) await say(T.doorsOpen(next));
+    else { confetti(120); await say(T.allBadges); }
     announceNext(200);
   }
 
@@ -880,20 +937,19 @@
   function bowl() {
     Sfx.pop();
     if (!S.pets.length) {
-      say([['pl', 'To miska. Po angielsku:'], ['en', 'bowl.'], ['pl', 'Tu będzie jadło twoje zwierzątko. Zdobądź odznakę u sowy!']]);
+      say(T.bowlInfo);
       return;
     }
-    const intro = isHungry() ? 'Mniam! Nakarmimy zwierzątka. Licz uważnie!' : 'Zwierzątka chcą przekąskę. Policzymy?';
-    runGame({
+        runGame({
       mode: 'practice',
-      intro: { icon: '🥣', parts: [['pl', intro]] },
+      intro: { icon: '🥣', parts: isHungry() ? T.feedHungry : T.feedSnack },
       questions: Array.from({ length: 3 }, (_, k) => qCount(k, k === 0)),
       onDone: async (sc, t, s) => {
         S.fedAt = Date.now(); save();
         s.setRepeat(null);
         s.body.replaceChildren(h('div', { class: 'big-mascot bounce' }, S.pets.map(id => PET_BY_ID[id].e).join(' ')));
         hearts(s.body, 6); Sfx.fanfare();
-        await say([['pl', 'Mniam, mniam! Dziękuję!'], ['en', 'Thank you!']]);
+        await say(T.thanks);
         if (!s.closed) s.close();
         updateNeeds();
         petEls.forEach(el => hearts(el));
@@ -907,18 +963,18 @@
     const badges = h('div', { class: 'badge-row' }, ROOMS.map(r => {
       const got = S.badges.includes(r.id);
       const b = h('button', { class: 'badge' + (got ? ' got' : ''), 'aria-label': r.pl }, got ? r.icon : '?');
-      b.onclick = () => { Sfx.pop(); boing(b); say(got ? [['pl', 'Odznaka: ' + r.pl + '.'], ['en', r.en + '!']] : [['pl', 'Tej odznaki jeszcze nie masz.']]); };
+      b.onclick = () => { Sfx.pop(); boing(b); say(got ? T.badgeName(r) : T.badgeLocked); };
       return b;
     }));
     const pets = h('div', { class: 'pet-row' }, S.pets.length ? S.pets.map(id => {
       const p = PET_BY_ID[id];
       const b = h('button', { class: 'tile', 'aria-label': p.pl }, h('span', { class: 'tile-emoji' }, p.e));
-      b.onclick = () => { Sfx.pop(); boing(b); say([['pl', cap(p.pl) + '.'], ['en', p.en + '.']]); };
+      b.onclick = () => { Sfx.pop(); boing(b); say(T.pet(p)); };
       return b;
     }) : h('div', { class: 'tile ghost' }, h('span', { class: 'tile-emoji' }, '🎁')));
     s.body.append(h('div', { class: 'label' }, 'Odznaki'), badges, h('div', { class: 'label' }, 'Zwierzątka'), pets);
     const n = S.badges.length;
-    say([['pl', n ? `Masz ${n === 1 ? 'jedną odznakę' : PL_NUM[n] + ' odznaki'}!` : 'Nie masz jeszcze odznak. Sowa da ci odznakę za test!']]);
+    say(T.badgeCount(n));
   }
 
   /* ---------- panel rodzica (przytrzymaj ⚙️) ---------- */
@@ -938,10 +994,12 @@
       return h('tr', {}, h('td', {}, `${r.icon} ${cap(r.pl)}`), h('td', {}, `${rs.stars.filter(Boolean).length}/3`), h('td', {}, `${rs.explored.length}/${r.objects.length}`), h('td', {}, S.badges.includes(r.id) ? 'tak' : 'nie'), h('td', {}, tests));
     });
     const words = Object.keys(S.heard).length;
-    const slow = h('button', { class: 'pbtn' }, S.slowVoice ? 'Głos: wolniej ✓' : 'Głos: normalnie');
-    slow.onclick = () => { S.slowVoice = !S.slowVoice; save(); slow.textContent = S.slowVoice ? 'Głos: wolniej ✓' : 'Głos: normalnie'; say([['pl', 'Tak mówię po polsku.'], ['en', 'And this is English.']]); };
+    const voiceLabel = () => (S.deviceVoice ? 'Głos: telefonu ✓' : 'Głos: nagrany ✓');
+    const slow = h('button', { class: 'pbtn' }, voiceLabel());
+    slow.onclick = () => { S.deviceVoice = !S.deviceVoice; save(); slow.textContent = voiceLabel(); say(T.voiceTest); };
+    slow.disabled = !vi.device && !S.deviceVoice;
     const test = h('button', { class: 'pbtn' }, 'Sprawdź głos');
-    test.onclick = () => say([['pl', 'Tak mówię po polsku.'], ['en', 'And this is English.']]);
+    test.onclick = () => say(T.voiceTest);
     let armed = false;
     const reset = h('button', { class: 'pbtn danger' }, 'Wyczyść postęp');
     reset.onclick = () => {
@@ -954,9 +1012,9 @@
       h('div', { class: 'table-wrap' }, h('table', {},
         h('thead', {}, h('tr', {}, h('th', {}, 'Pokój'), h('th', {}, 'Gwiazdki'), h('th', {}, 'Otwarte'), h('th', {}, 'Odznaka'), h('th', {}, 'Ostatnie testy'))),
         h('tbody', {}, rows))),
-      h('p', { class: 'muted' }, vi.supported
-        ? `Głos polski: ${vi.pl || 'nie znaleziono'} · angielski: ${vi.en || 'nie znaleziono'}.` + (vi.pl ? '' : ' Zainstaluj polski głos w ustawieniach telefonu: Ustawienia → Ułatwienia dostępu → Zamiana tekstu na mowę.')
-        : 'Ta przeglądarka nie obsługuje mowy. Spróbuj w Chrome (Android) lub Safari (iPhone).'),
+      h('p', { class: 'muted' }, `Gra ma ${vi.recorded} nagranych wypowiedzi i mówi nimi zawsze, także bez internetu. ` + (vi.device
+        ? `Telefon ma też własne głosy (${vi.pl}, ${vi.en}). Brzmią ładniej, ale nie działają w każdej aplikacji. Jeśli po przełączeniu na „głos telefonu” gra milknie, wróć do nagranego.`
+        : 'Telefon nie ma tu polskiego i angielskiego głosu, więc zostaje głos nagrany.')),
       h('div', { class: 'pbtns' }, slow, test, reset),
     );
   }

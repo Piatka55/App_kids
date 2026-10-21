@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Mój Domek</title>
-<meta name="description" content="Gra dla dzieci: opiekuj się zwierzątkiem i ucz się angielskiego i matematyki.">
+<meta name="description" content="Gra dla dzieci: podróż ze zwierzakiem, angielski i matematyka krok po kroku.">
 <meta name="theme-color" content="#7A5CFA">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -33,32 +33,58 @@
         </div>
       </div>
       <button id="play" class="play" aria-label="Graj"><span></span></button>
-      <p class="hint">🔊 Włącz dźwięk w telefonie</p>
+      <p class="hint">🔊 Podgłośnij telefon</p>
     </div>
     <div class="hills"></div>
   </section>
 
   <section id="chooser" class="screen" hidden>
     <div class="chooser-top">
-      <button id="charBack" class="round-btn" aria-label="Wróć">⬅</button>
-      <h2>Kim chcesz być?</h2>
+      <button id="chooserBack" class="round-btn" aria-label="Wróć">⬅</button>
+      <div id="chooserIcon" class="chooser-icon" aria-hidden="true">🙂</div>
     </div>
-    <div id="charGrid" class="tile-grid"></div>
-    <button id="charOk" class="ok-btn pop" aria-label="Gotowe" hidden>✔</button>
+    <div id="chooserGrid" class="tile-grid"></div>
+    <button id="chooserOk" class="ok-btn pop" aria-label="Gotowe" hidden>✔</button>
   </section>
 
-  <section id="home" class="screen" hidden>
-    <div id="scene">
-      <div id="world" class="world"></div>
-      <div id="edge" class="edge" hidden></div>
-    </div>
-    <header id="hud">
-      <button id="meBtn" class="round-btn me" aria-label="Zmień postać">🙂</button>
-      <button id="roomIcon" class="round-btn small" aria-label="Pokój">🍳</button>
-      <div id="stars" class="stars"></div>
-      <button id="badgeBtn" class="round-btn" aria-label="Odznaki">🏅</button>
-      <button id="parentBtn" class="round-btn small gear" aria-label="Panel rodzica (przytrzymaj)">⚙️</button>
+  <section id="map" class="screen" hidden>
+    <div id="mapScroll"><div id="mapWorld"></div></div>
+    <header class="map-top">
+      <button id="heroBtn" class="round-btn hero" aria-label="Zmień postać">🙂</button>
+      <div class="ep-switch">
+        <button id="epPrev" class="round-btn small" aria-label="Poprzednia kraina">◀</button>
+        <div id="epTitle" class="ep-title"></div>
+        <button id="epNext" class="round-btn small" aria-label="Następna kraina">▶</button>
+      </div>
+      <span class="top-spacer"></span>
     </header>
+    <button id="houseBtn" class="house-btn" aria-label="Domek zwierzaka"><span id="houseBtnPet">🏠</span></button>
+    <button id="parentBtn" class="round-btn small gear" aria-label="Panel rodzica (przytrzymaj)">⚙️</button>
+  </section>
+
+  <section id="level" class="screen" hidden>
+    <header class="lv-top">
+      <button id="lvClose" class="round-btn" aria-label="Wróć do mapy">✖</button>
+      <div class="bar"><i id="lvBar"></i></div>
+      <button id="lvRepeat" class="round-btn" aria-label="Powtórz">🔊</button>
+    </header>
+    <div id="stage"></div>
+    <div id="buddy" class="buddy"></div>
+  </section>
+
+  <section id="house" class="screen" hidden>
+    <header class="lv-top">
+      <button id="houseClose" class="round-btn" aria-label="Wróć do mapy">✖</button>
+      <div id="treats" class="treats"></div>
+    </header>
+    <div class="house-room">
+      <div id="housePet" class="house-pet"></div>
+      <button id="treatJar" class="treat-jar" aria-label="Smakołyk">🍪</button>
+    </div>
+    <div class="house-trays">
+      <div id="accTray" class="tray"></div>
+      <div id="petTray" class="tray"></div>
+    </div>
   </section>
 
   <div id="overlay" hidden></div>

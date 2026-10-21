@@ -85,71 +85,92 @@ const GROUPS = {
   sea: ['🐟', '🐙', '🦀', '🐳', '🐬', '🐚'], birds: ['🐦', '🦆', '🦉', '🦜', '🐧', '🐓'],
 };
 
-/* Pomocnik do opisu poziomów: L(typ zadania, parametry). Każdy poziom ma 5 zadań (memory: 2 plansze). */
-const L = (type, p = {}) => ({ kind: 'level', type, p });
+/* Lekcja = 📖 nauka (learn) + 🎮 gra-test (test: lista zadań) + 🍬 nagroda za co najmniej 2 gwiazdki.
+   W(…) lekcja słówek, M(…) lekcja matematyki lub logiki. */
+const W = (words, test, kind = 'words') => ({ kind: 'lesson', subj: 'en', learn: { t: kind, words }, test });
+const M = (icon, learn, test) => ({ kind: 'lesson', subj: 'math', icon, learn, test });
 const CHEST = { kind: 'chest' };
-const BOSS = tasks => ({ kind: 'boss', type: 'mix', p: { tasks } });
+const BOSS = test => ({ kind: 'boss', test });
+const x = (n, spec) => Array.from({ length: n }, () => spec);
+const listen = (n, review = false) => ['listen', { n, review }];
 
 const EPISODES = [
   {
     id: 'home', pl: 'Domek', icon: '🏠', sky: ['#FFE9B8', '#FFCFB0'], ground: '#F6B48F',
-    deco: ['🪴', '🛋️', '🧸', '🖼️', '🕯️', '📚'],
-    words: ['apple', 'banana', 'milk', 'bread', 'cheese', 'egg', 'carrot', 'cake', 'strawberry', 'cookie'],
-    emo: ['🍎', '🍪', '🍓', '🧁'],
+    deco: ['🪴', '🛋️', '🧸', '🖼️', '🕯️', '📚'], emo: ['🍎', '🍪', '🍓', '🧁'],
     nodes: [
-      L('listen', { n: 2 }), L('count', { max: 3 }), L('listen', { n: 3 }), L('tapN', { max: 3 }),
-      CHEST, L('pattern', { kinds: ['AB'] }), L('numEN', { max: 3 }), L('compare', { max: 5 }), L('memory', { pairs: 3 }),
-      BOSS([['listen', { n: 3 }], ['count', { max: 4 }], ['listen', { n: 3 }], ['tapN', { max: 4 }], ['pattern', { kinds: ['AB'] }], ['numEN', { max: 3 }]]),
+      W(['apple', 'banana', 'milk'], [listen(2), listen(2), listen(3), listen(3), ['memory', { pairs: 3 }]]),
+      M('🔢', { t: 'numbers', from: 1, to: 3 }, [['count', { max: 3 }], ['numEN', { max: 3 }], ['count', { max: 3 }], ['numEN', { max: 3 }], ['count', { max: 3 }]]),
+      W(['bread', 'cheese', 'egg'], [listen(3), listen(3), listen(3, true), listen(3), ['memory', { pairs: 3 }]]),
+      M('🍪', { t: 'onetoone' }, [['tapN', { max: 3 }], ['count', { max: 4 }], ['tapN', { max: 4 }], ['count', { max: 4 }], ['tapN', { max: 4 }]]),
+      CHEST,
+      W(['carrot', 'cake', 'strawberry', 'cookie'], [listen(3), listen(3), listen(3, true), listen(4), ['memory', { pairs: 4 }]]),
+      M('⚖️', { t: 'more' }, x(5, ['compare', { max: 5 }])),
+      M('🧩', { t: 'pattern', kind: 'AB' }, x(5, ['pattern', { kinds: ['AB'] }])),
+      BOSS([listen(3, true), ['count', { max: 4 }], listen(3, true), ['tapN', { max: 4 }], ['pattern', { kinds: ['AB'] }], ['numEN', { max: 3 }], ['compare', { max: 5 }]]),
     ],
   },
   {
     id: 'garden', pl: 'Ogród', icon: '🌻', sky: ['#C8F1FF', '#B6F0C2'], ground: '#7FD68F',
-    deco: ['🌷', '🌻', '🌳', '🐞', '🦋', '🌼'],
-    words: ['cat', 'dog', 'bird', 'cow', 'horse', 'pig', 'duck', 'rabbit', 'frog', 'bee', 'butterfly', 'snail'],
-    emo: ['🐞', '🌼', '🐝', '🦋'],
+    deco: ['🌷', '🌻', '🌳', '🐞', '🦋', '🌼'], emo: ['🐞', '🌼', '🐝', '🦋'],
     nodes: [
-      L('colors', { n: 3 }), L('count', { max: 6 }), L('listen', { n: 3 }), L('shapes', { n: 3, set: 3 }),
-      L('pattern', { kinds: ['AB', 'ABB'] }), CHEST, L('tapN', { max: 6 }), L('odd', { n: 4 }), L('memory', { pairs: 4 }), L('numEN', { max: 5 }),
-      BOSS([['colors', { n: 4 }], ['count', { max: 7 }], ['listen', { n: 4 }], ['shapes', { n: 3, set: 3 }], ['odd', { n: 4 }], ['numEN', { max: 5 }]]),
+      W(['cat', 'dog', 'bird', 'cow'], [listen(3), listen(3), listen(4, true), listen(4), ['memory', { pairs: 4 }]]),
+      M('🔢', { t: 'numbers', from: 4, to: 5 }, [['count', { max: 5 }], ['numEN', { max: 5 }], ['count', { max: 5 }], ['numEN', { max: 5 }], ['tapN', { max: 5 }]]),
+      W(['red', 'blue', 'yellow', 'green'], x(5, ['colors', { n: 3 }]), 'colors'),
+      M('🎲', { t: 'subitize' }, x(5, ['flash', { max: 5 }])),
+      CHEST,
+      W(['horse', 'pig', 'duck', 'rabbit', 'frog'], [listen(4), listen(4), listen(4, true), listen(4), ['memory', { pairs: 4 }]]),
+      W(['circle', 'square', 'triangle'], x(5, ['shapes', { n: 3 }]), 'shapes'),
+      M('🔍', { t: 'odd' }, x(5, ['odd', { n: 4 }])),
+      BOSS([listen(4, true), ['colors', { n: 4 }], ['flash', { max: 5 }], ['shapes', { n: 3 }], ['odd', { n: 4 }], ['numEN', { max: 5 }], ['memory', { pairs: 4 }]]),
     ],
   },
   {
     id: 'beach', pl: 'Plaża', icon: '🏖️', sky: ['#9EDCFF', '#FFE8A8'], ground: '#F7D58B',
-    deco: ['🌴', '🐚', '⛱️', '🦀', '🌊', '⛵'],
-    words: ['fish', 'crab', 'shell', 'sun', 'boat', 'icecream', 'whale', 'octopus', 'dolphin', 'umbrella', 'hat', 'ball'],
-    emo: ['🐚', '🐟', '⭐', '🦀'],
+    deco: ['🌴', '🐚', '⛱️', '🦀', '🌊', '⛵'], emo: ['🐚', '🐟', '⭐', '🦀'],
     nodes: [
-      L('add', { max: 4 }), L('listen', { n: 4 }), L('count', { max: 8 }), L('size', {}),
-      L('colors', { n: 4 }), CHEST, L('pattern', { kinds: ['ABC', 'ABB'] }), L('add', { max: 5 }), L('memory', { pairs: 5 }), L('compare', { max: 10, less: true }),
-      BOSS([['add', { max: 5 }], ['listen', { n: 4 }], ['count', { max: 9 }], ['size', {}], ['pattern', { kinds: ['ABC'] }], ['colors', { n: 5 }]]),
+      W(['fish', 'crab', 'shell', 'whale'], [listen(4), listen(4), listen(4, true), listen(4), ['memory', { pairs: 4 }]]),
+      M('🔟', { t: 'tenframe' }, [['frame', { max: 10 }], ['frame', { max: 10 }], ['numEN', { max: 8 }], ['frame', { max: 10 }], ['numEN', { max: 10 }]]),
+      M('➕', { t: 'add', ex: [[2, 1], [3, 2]] }, x(5, ['add', { max: 5 }])),
+      W(['boat', 'sun', 'icecream', 'umbrella', 'hat'], [listen(4), listen(4), listen(5, true), listen(5), ['memory', { pairs: 5 }]]),
+      CHEST,
+      M('📏', { t: 'size' }, x(5, ['size', {}])),
+      W(['purple', 'orange', 'pink', 'brown'], x(5, ['colors', { n: 4 }]), 'colors'),
+      M('🧩', { t: 'pattern', kind: 'ABC' }, [['pattern', { kinds: ['ABC'] }], ['pattern', { kinds: ['ABB'] }], ['pattern', { kinds: ['ABC'] }], ['pattern', { kinds: ['ABB'] }], ['pattern', { kinds: ['ABC'] }]]),
+      BOSS([listen(5, true), ['add', { max: 5 }], ['frame', { max: 10 }], ['size', {}], ['colors', { n: 5 }], ['pattern', { kinds: ['ABC'] }], ['memory', { pairs: 5 }]]),
     ],
   },
   {
     id: 'forest', pl: 'Las', icon: '🌲', sky: ['#BFE6D0', '#8FCB9B'], ground: '#5FAF6E',
-    deco: ['🌲', '🍄', '🌳', '🦔', '🍁', '🪵'],
-    words: ['tree', 'bear', 'fox', 'owl', 'mushroom', 'flower', 'hedgehog', 'squirrel', 'leaf', 'deer', 'wolf', 'acorn'],
-    emo: ['🍄', '🌰', '🍁', '🌲'],
+    deco: ['🌲', '🍄', '🌳', '🦔', '🍁', '🪵'], emo: ['🍄', '🌰', '🍁', '🌲'],
     nodes: [
-      L('sub', { max: 5 }), L('listen', { n: 4 }), L('numEN', { max: 8 }), L('odd', { n: 5 }),
-      L('add', { max: 7 }), CHEST, L('pattern', { kinds: ['AAB', 'ABC'] }), L('shapes', { n: 4, set: 5 }), L('memory', { pairs: 6 }), L('tapN', { max: 9 }),
-      BOSS([['sub', { max: 6 }], ['listen', { n: 5 }], ['numEN', { max: 9 }], ['odd', { n: 5 }], ['add', { max: 8 }], ['pattern', { kinds: ['AAB'] }]]),
+      W(['tree', 'bear', 'fox', 'owl'], [listen(4), listen(4), listen(5, true), listen(5), ['memory', { pairs: 5 }]]),
+      M('➖', { t: 'sub', ex: [5, 2] }, x(5, ['sub', { max: 5 }])),
+      W(['mushroom', 'flower', 'hedgehog', 'squirrel'], [listen(4), listen(5), listen(5, true), listen(5), ['memory', { pairs: 5 }]]),
+      M('➕', { t: 'counton' }, x(5, ['add', { max: 10 }])),
+      CHEST,
+      W(['leaf', 'deer', 'wolf', 'acorn'], [listen(5), listen(5), listen(6, true), listen(5), ['memory', { pairs: 6 }]]),
+      M('⚖️', { t: 'more', less: true }, x(5, ['compare', { max: 10, less: true }])),
+      M('🧩', { t: 'pattern', kind: 'AAB' }, [['pattern', { kinds: ['AAB'] }], ['odd', { n: 5 }], ['pattern', { kinds: ['AAB'] }], ['odd', { n: 5 }], ['pattern', { kinds: ['AAB'] }]]),
+      BOSS([listen(5, true), ['sub', { max: 6 }], ['add', { max: 8 }], ['compare', { max: 10, less: true }], ['odd', { n: 5 }], ['pattern', { kinds: ['AAB'] }], ['memory', { pairs: 6 }]]),
     ],
   },
   {
     id: 'castle', pl: 'Zamek', icon: '🏰', sky: ['#D9CCFF', '#FFC8E6'], ground: '#B9A3F5',
-    deco: ['🏰', '✨', '🌙', '⭐', '🐉', '💎'],
-    words: ['crown', 'dragon', 'castle', 'key', 'king', 'queen', 'star', 'moon', 'rocket', 'unicorn', 'gift', 'ring'],
-    emo: ['💎', '⭐', '👑', '🔑'],
+    deco: ['🏰', '✨', '🌙', '⭐', '🐉', '💎'], emo: ['💎', '⭐', '👑', '🔑'],
     nodes: [
-      L('add', { max: 10 }), L('listen', { n: 5 }), L('sub', { max: 8 }), L('colors', { n: 6 }),
-      L('pattern', { kinds: ['ABC', 'AABB'] }), CHEST, L('numEN', { max: 10 }), L('compare', { max: 10, less: true }), L('memory', { pairs: 6 }), L('shapes', { n: 5, set: 6 }),
-      BOSS([['add', { max: 10 }], ['sub', { max: 9 }], ['listen', { n: 6 }], ['numEN', { max: 10 }], ['pattern', { kinds: ['AABB'] }], ['odd', { n: 5 }]]),
+      W(['crown', 'dragon', 'castle', 'key'], [listen(4), listen(5), listen(5, true), listen(5), ['memory', { pairs: 5 }]]),
+      M('🔟', { t: 'bonds' }, x(5, ['bond', {}])),
+      W(['king', 'queen', 'star', 'moon'], [listen(5), listen(5), listen(6, true), listen(6), ['memory', { pairs: 6 }]]),
+      M('➖', { t: 'sub', ex: [8, 3] }, x(5, ['sub', { max: 9 }])),
+      CHEST,
+      W(['rocket', 'unicorn', 'gift', 'ring'], [listen(5), listen(6), listen(6, true), listen(6), ['memory', { pairs: 6 }]]),
+      W(['star', 'heart', 'rectangle'], x(5, ['shapes', { n: 4 }]), 'shapes'),
+      M('🧩', { t: 'pattern', kind: 'AABB' }, [['pattern', { kinds: ['AABB'] }], ['add', { max: 10 }], ['pattern', { kinds: ['AABB'] }], ['sub', { max: 10 }], ['pattern', { kinds: ['AABB'] }]]),
+      BOSS([listen(6, true), ['bond', {}], ['add', { max: 10 }], ['sub', { max: 10 }], ['numEN', { max: 10 }], ['pattern', { kinds: ['AABB'] }], ['memory', { pairs: 6 }]]),
     ],
   },
 ];
 
-/* Ikonki zadań na mapie */
-const TYPE_ICON = {
-  listen: '👂', colors: '🎨', shapes: '🔷', numEN: '🔢', memory: '🃏', count: '🧮', tapN: '🍪',
-  compare: '⚖️', size: '📏', pattern: '🧩', odd: '🔍', add: '➕', sub: '➖', mix: '🦉',
-};
+/* Cukierki do nagrody (układanka trzy w rzędzie) */
+const CANDY = ['🍬', '🍭', '🍩', '🧁', '🍫'];

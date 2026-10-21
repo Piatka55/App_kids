@@ -65,7 +65,11 @@
   <section id="level" class="screen" hidden>
     <header class="lv-top">
       <button id="lvClose" class="round-btn" aria-label="Wróć do mapy">✖</button>
-      <div class="bar"><i id="lvBar"></i></div>
+      <div class="lv-mid">
+        <div id="phases" class="phases"><span data-ph="learn">📖</span><span data-ph="game">🎮</span><span data-ph="reward">🍬</span></div>
+        <div class="bar"><i id="lvBar"></i></div>
+      </div>
+      <button id="lvSkip" class="round-btn small" aria-label="Pomiń naukę" hidden>⏭</button>
       <button id="lvRepeat" class="round-btn" aria-label="Powtórz">🔊</button>
     </header>
     <div id="stage"></div>

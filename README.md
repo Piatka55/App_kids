@@ -5,21 +5,31 @@ Gra na telefon dla dziecka w wieku ok. 6 lat, w stylu Logic Like. Dziecko idzie 
 ## Przebieg gry
 
 1. Wybór postaci (24) i zwierzaka (16).
-2. **Mapa krainy:** ścieżka kółek od dołu do góry. Świecące kółko to następny poziom, a zamknięte kółka mają kłódkę.
-3. **Poziom:** pasek postępu u góry, zwierzak w rogu cieszy się przy dobrej odpowiedzi. Gwiazdki zależą od liczby pomyłek: 0–1 to ⭐⭐⭐, 2–3 to ⭐⭐, więcej to ⭐.
-4. 🎁 **Skrzynka w połowie krainy:** ozdoba dla zwierzaka (kokarda, korona, okulary…).
-5. 🦉 **Sowa na końcu krainy:** wyzwanie z mieszanymi zadaniami. Nagrodą jest nowy zwierzak, kolejna ozdoba i następna kraina.
-6. **Domek zwierzaka** (duży przycisk w lewym dolnym rogu mapy): karmienie smakołykami, przebieranie w ozdoby, zmiana zwierzaka.
+2. **Mapa krainy:** ścieżka kółek od dołu do góry. Każde kółko to lekcja.
+3. **Lekcja w trzech krokach** (widać je u góry ekranu):
+   - 📖 **Nauka:** obrazek i lektor mówi słówko (dwa razy, bez tłumaczenia). Potem ćwiczenie z podpowiedzią, w którym błąd od razu pokazuje dobrą odpowiedź. W matematyce pokaz: liczymy razem, łączymy w pary, ramka na dziesięć, „część i część to całość”.
+   - 🎮 **Gra-test:** 5 zadań z tego, czego dziecko się nauczyło, plus powtórka słówek, które sprawiały trudność. Gwiazdki zależą od liczby pomyłek: 0–1 to ⭐⭐⭐, 2–3 to ⭐⭐, więcej to ⭐.
+   - 🍬 **Nagroda** (tylko za 2–3 gwiazdki): krótka gra w stylu Candy Crush, 10 ruchów, w której dziecko zdobywa smakołyki dla zwierzaka. Za 1 gwiazdkę gra proponuje powtórkę lekcji, a następna próba jest łatwiejsza.
+4. 🎁 **Skrzynka w połowie krainy:** ozdoba dla zwierzaka.
+5. 🦉 **Sowa na końcu krainy:** sprawdzian z całej krainy. Nagrodą są cukierki, nowy zwierzak, ozdoba i następna kraina.
+6. **Domek zwierzaka** (duży przycisk na mapie): karmienie smakołykami i przebieranie.
 
 | Kraina | Angielski | Matematyka i logika |
 |---|---|---|
-| 🏠 Domek | jedzenie, liczby 1–3 | liczenie do 4, dawanie N, więcej, wzór AB, memory |
-| 🌻 Ogród | zwierzęta, kolory, kształty, liczby do 5 | liczenie do 7, co nie pasuje, wzór ABB |
-| 🏖️ Plaża | morze i plaża, kolory | dodawanie do 5, rozmiary, mniej i więcej do 10, wzór ABC |
-| 🌲 Las | las, liczby do 9 | odejmowanie, dodawanie do 8, wzór AAB, kształty |
-| 🏰 Zamek | zamek i kosmos, liczby do 10 | dodawanie i odejmowanie do 10, wzór AABB |
+| 🏠 Domek | jedzenie (10 słówek) | liczby 1–3, liczenie po kolei, więcej i mniej, wzór AB |
+| 🌻 Ogród | zwierzęta, kolory, kształty | liczby 4–5, szybkie rozpoznawanie kropek, co nie pasuje |
+| 🏖️ Plaża | morze i plaża, kolejne kolory | ramka na dziesięć (6–10), dodawanie do 5, rozmiary, wzory ABC i ABB |
+| 🌲 Las | las | odejmowanie, dodawanie do 10 (liczenie dalej), mniej i więcej do 10, wzór AAB |
+| 🏰 Zamek | zamek i kosmos, kształty | ile brakuje do 10, odejmowanie do 10, wzór AABB |
 
-Rodzaje zadań: posłuchaj i dotknij obrazka, kolory (baloniki), kształty, liczby po angielsku (kropki), memory, ile jest, nakarm N, gdzie więcej/mniej, największy/najmniejszy, co dalej (wzory), co nie pasuje, dodawanie, odejmowanie (kilka ucieka). Wszystko jest opisane w `js/data.js`, więc łatwo dodać poziomy i krainy.
+## Na czym opiera się nauka
+
+- **Słówka:** obrazek i głos lektora zamiast tłumaczenia. Najpierw słuchanie i pokazywanie, bez presji mówienia, bo to zmniejsza stres u małych dzieci. 3–5 nowych słów na lekcję.
+- **Powtórki rozłożone w czasie:** każde słówko ma swoje „pudełko” jak w fiszkach. Błąd cofa je na początek, a najsłabsze słówka wracają w kolejnych lekcjach i u sowy.
+- **Matematyka od konkretu do symbolu:** przedmioty, potem kropki i ramka na dziesięć, potem cyfra. Szybkie rozpoznawanie ilości bez liczenia, liczenie po kolei (jeden dotyk to jedna liczba), łączenie w pary przy porównywaniu, część i część to całość przy dodawaniu i „ile brakuje do 10”.
+- **Błąd uczy:** przy liczeniu, dodawaniu i odejmowaniu po pierwszej pomyłce gra liczy razem z dzieckiem. Po drugiej podświetla dobrą odpowiedź. Przy słówkach mówi, co dziecko dotknęło.
+- **Trudność dopasowana do dziecka:** po słabym wyniku następna próba ma mniej obrazków i mniejsze liczby. Chodzi o to, żeby dziecko miało około 65–85% dobrych odpowiedzi.
+- **Nagrody z umiarem:** cukierki tylko za dobry wynik i tylko 10 ruchów, żeby nagroda była przerwą, a nie powodem do przeklikiwania nauki.
 
 ## Głos
 

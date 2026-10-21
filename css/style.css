@@ -216,11 +216,20 @@ button:focus-visible { outline: 4px solid var(--sun); outline-offset: 3px; }
   border: 3px solid var(--ink); margin-bottom: 18%; animation: sway 2.4s ease-in-out infinite;
 }
 .balloon::after { content: ""; position: absolute; left: 50%; top: 100%; width: 2px; height: 34%; background: var(--ink); }
-.dots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7%; width: 74%; aspect-ratio: 1; align-content: center; justify-items: center; }
+.dots { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 7%; width: 74%; aspect-ratio: 1; align-content: center; justify-items: center; }
 .dots i { width: 100%; aspect-ratio: 1; border-radius: 50%; background: var(--coral); border: 2px solid var(--ink); }
-.dots.d1, .dots.d2 { grid-template-columns: repeat(2, 1fr); width: 60%; }
-.dots.d1 { grid-template-columns: 1fr; width: 34%; }
-.dots.d10 { grid-template-columns: repeat(4, 1fr); }
+.dots.d1, .dots.d2, .dots.d3, .dots.d4, .dots.d5, .dots.d6 { grid-template-rows: repeat(3, 1fr); }
+/* 1–6 jak oczka na kostce (łatwo rozpoznać bez liczenia), 10 jak ramka 5 + 5 */
+.dots.d1 i:nth-child(1) { grid-area: 2 / 2; }
+.dots.d2 i:nth-child(1), .dots.d3 i:nth-child(1), .dots.d4 i:nth-child(1), .dots.d5 i:nth-child(1), .dots.d6 i:nth-child(1) { grid-area: 1 / 1; }
+.dots.d2 i:nth-child(2), .dots.d3 i:nth-child(3) { grid-area: 3 / 3; }
+.dots.d3 i:nth-child(2), .dots.d5 i:nth-child(5) { grid-area: 2 / 2; }
+.dots.d4 i:nth-child(2), .dots.d5 i:nth-child(2), .dots.d6 i:nth-child(2) { grid-area: 1 / 3; }
+.dots.d4 i:nth-child(3), .dots.d5 i:nth-child(3), .dots.d6 i:nth-child(3) { grid-area: 3 / 1; }
+.dots.d4 i:nth-child(4), .dots.d5 i:nth-child(4), .dots.d6 i:nth-child(4) { grid-area: 3 / 3; }
+.dots.d6 i:nth-child(5) { grid-area: 2 / 1; }
+.dots.d6 i:nth-child(6) { grid-area: 2 / 3; }
+.dots.d10 { grid-template-columns: repeat(5, 1fr); gap: 4%; width: 92%; aspect-ratio: auto; }
 
 .memory { display: grid; gap: 10px; width: 100%; max-width: 420px; grid-template-columns: repeat(3, 1fr); }
 .memory.m8, .memory.m12 { grid-template-columns: repeat(4, 1fr); }
@@ -327,6 +336,66 @@ button:focus-visible { outline: 4px solid var(--sun); outline-offset: 3px; }
 #confetti { position: fixed; inset: 0; pointer-events: none; z-index: 70; overflow: hidden; }
 #confetti i { position: absolute; top: -20px; width: 10px; height: 16px; border-radius: 3px; animation: fall linear forwards; }
 .heart { position: absolute; bottom: 60%; font-size: 26px; pointer-events: none; animation: rise 1.6s ease-out forwards; z-index: 5; }
+
+
+/* ---------- etapy lekcji i nauka ---------- */
+.lv-mid .bar { flex: none; height: 18px; }
+.lv-mid { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.phases { display: flex; justify-content: center; gap: 10px; }
+.phases span { font-size: 20px; line-height: 1; padding: 3px 10px; border-radius: 99px; background: rgba(255,255,255,.5); border: 2px solid transparent; opacity: .55; filter: grayscale(.6); transition: all .25s; }
+.phases span.on { opacity: 1; filter: none; background: var(--paper); border-color: var(--ink); transform: scale(1.15); }
+.big-icon { font-size: 120px; line-height: 1; }
+.learn-box {
+  width: 100%; max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 16px;
+  background: rgba(255,255,255,.85); border: 4px solid var(--ink); border-radius: 32px; box-shadow: 0 8px 0 var(--ink); padding: 22px 16px;
+}
+.word-card { display: flex; flex-direction: column; align-items: center; gap: 10px; --card-emoji: clamp(110px, 34vw, 150px); }
+.word-card .balloon { width: 130px; }
+.word-card .shape { width: 150px; }
+.word-en { font-size: 40px; font-weight: 800; color: var(--grape); line-height: 1; }
+.num-card { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.big-digit { font-size: 96px; font-weight: 800; line-height: .9; color: var(--grape); -webkit-text-stroke: 2px var(--ink); }
+.ok-btn.next { margin-top: 4px; }
+.it.lit, .dots i.lit { animation: boing .45s; filter: drop-shadow(0 0 10px var(--sun)); }
+.it.lit { background: rgba(255,201,60,.55); border-radius: 50%; }
+.tap-row .it { cursor: pointer; font-size: 58px; padding: 4px; }
+.pairs { gap: 20px; }
+.pairs-row { display: flex; gap: 14px; }
+.pairs-row .it { font-size: 40px; width: 50px; text-align: center; border-radius: 14px; }
+.pairs-row .it.paired { background: rgba(47,191,132,.35); }
+.lit-row .it:not(.paired) { opacity: 1; }
+.lit-row { outline: 4px dashed var(--coral); outline-offset: 6px; border-radius: 14px; }
+.odd-mark { outline: 4px solid var(--coral); border-radius: 50%; }
+.sizes-row { display: flex; align-items: flex-end; justify-content: center; gap: 18px; min-height: 140px; }
+.row.merged { max-width: 260px; }
+.tframe { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 8px; background: var(--paper); border: 4px solid var(--ink); border-radius: 16px; width: min(300px, 80vw); }
+.tf { aspect-ratio: 1; border-radius: 10px; border: 3px dashed rgba(43,33,64,.3); position: relative; transition: background .2s; }
+.tf.on::after, .tf.add::after { content: ""; position: absolute; inset: 14%; border-radius: 50%; background: var(--coral); border: 2px solid var(--ink); animation: popIn .3s both; }
+.tf.add::after { background: var(--sky); }
+.tf.lit { background: rgba(255,201,60,.6); }
+.flash-card { position: relative; width: 170px; height: 170px; display: grid; place-items: center; background: var(--paper); border: 4px solid var(--ink); border-radius: 28px; box-shadow: 0 7px 0 var(--ink); }
+.flash-card .dots { width: 80%; }
+.flash-card::after { content: "❓"; position: absolute; inset: -4px; display: grid; place-items: center; font-size: 70px; border-radius: 28px; background: var(--grape); border: 4px solid var(--ink); opacity: 0; transform: scale(.6); transition: opacity .25s, transform .25s; pointer-events: none; }
+.flash-card.covered::after { opacity: 1; transform: none; }
+
+/* ---------- 🍬 nagroda: cukierki ---------- */
+.candy-hud { display: flex; gap: 14px; }
+.candy-hud span { padding: 4px 16px; font-size: 26px; font-weight: 800; background: var(--paper); border: 3px solid var(--ink); border-radius: 99px; box-shadow: 0 4px 0 var(--ink); }
+.candy-board {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; width: min(380px, 94vw); padding: 8px;
+  background: linear-gradient(#FFD6EC, #E7D8FF); border: 4px solid var(--ink); border-radius: 22px; box-shadow: 0 7px 0 var(--ink);
+  touch-action: none;
+}
+.cell { aspect-ratio: 1; display: grid; place-items: center; font-size: clamp(30px, 9vw, 44px); line-height: 1; border-radius: 12px; background: rgba(255,255,255,.55); cursor: pointer; transition: transform .15s; }
+.cell.sel { background: var(--sun); transform: scale(1.12); }
+.cell.drop { animation: drop .3s cubic-bezier(.3, 1.4, .6, 1) both; }
+.cell.popc { animation: candyPop .28s forwards; }
+.cell.nope { animation: shake .3s; }
+.cell.hintc { animation: pulse .7s ease-in-out infinite; background: rgba(255,201,60,.7); }
+.candy-end { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.candy-end .petwrap { font-size: 120px; }
+@keyframes drop { from { transform: translateY(-60px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes candyPop { 40% { transform: scale(1.4); } to { transform: scale(0); opacity: 0; } }
 
 /* ---------- animacje ---------- */
 .pop { animation: popIn .35s cubic-bezier(.2, 1.6, .5, 1) both; }

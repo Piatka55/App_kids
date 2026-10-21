@@ -24,8 +24,8 @@
   }
 
   /* ---------- zapis postępu ---------- */
-  const SAVE_KEY = 'mojDomek.v2';
-  const fresh = () => ({ hero: null, pets: [], activePet: null, owned: [], wear: {}, prog: {}, ep: 0, treats: 0, fed: 0, tut: {}, voiceMode: 'auto', storyDone: false });
+  const SAVE_KEY = 'mojDomek.v3';
+  const fresh = () => ({ hero: null, pets: [], activePet: null, owned: [], wear: {}, prog: {}, ep: 0, treats: 0, fed: 0, tut: {}, mem: {}, easy: {}, voiceMode: 'auto', storyDone: false });
   let S = load();
   function load() {
     try { const raw = localStorage.getItem(SAVE_KEY); if (raw) return Object.assign(fresh(), JSON.parse(raw)); } catch (e) { /* brak zapisu */ }
@@ -313,6 +313,12 @@
   $('#heroBtn').onclick = () => { Sfx.pop(); chooseHero(false); };
 
   /* ---------- mapa ---------- */
+  function nodeIcon(n, st) {
+    if (n.kind === 'chest') return st ? '✨' : '🎁';
+    if (n.kind === 'boss') return '🦉';
+    if (n.subj === 'math') return n.icon;
+    return n.learn.t === 'colors' ? '🎨' : n.learn.t === 'shapes' ? '🔷' : WORDS[n.learn.words[0]][0];
+  }
   const NODE_GAP = 118, MAP_PAD = 150;
   const nodeX = i => 50 + 27 * Math.sin(i * 1.15);
   function openMap({ story = false, walkFrom = null, fanfareEp = false } = {}) {
@@ -358,7 +364,7 @@
     ep.nodes.forEach((n, i) => {
       const st = prog.stars[i] || 0;
       const state = i < cur ? 'done' : i === cur ? 'current' : 'locked';
-      const icon = n.kind === 'chest' ? (st ? '✨' : '🎁') : n.kind === 'boss' ? '🦉' : TYPE_ICON[n.type];
+      const icon = nodeIcon(n, st);
       const b = h('button', { class: `node ${n.kind} ${state}`, style: `left:${pts[i].x}%;top:${pts[i].y}px`, 'aria-label': 'poziom ' + (i + 1) },
         h('span', { class: 'node-icon' }, state === 'locked' ? '🔒' : icon));
       if (n.kind !== 'chest' && st) b.append(h('span', { class: 'node-stars' }, '⭐'.repeat(st)));
@@ -391,7 +397,7 @@
     if (state === 'locked') { Sfx.locked(); say(T.locked); return; }
     Sfx.pop();
     if (node.kind === 'chest') { openChest(ep, i); return; }
-    playLevel(S.ep, i);
+    playLesson(S.ep, i);
   }
 
   /* ---------- skrzynka ze skarbem ---------- */
@@ -427,43 +433,80 @@
     };
   }
 
-  /* ---------- poziom ---------- */
+  /* ---------- lekcja: 📖 nauka → 🎮 gra-test → 🍬 nagroda ----------
+     Zasady z badań nad uczeniem małych dzieci:
+     - słówko = obrazek + głos lektora, bez tłumaczenia; najpierw słuchanie, potem wybór (bez presji mówienia)
+     - nauka z podpowiedzią bez błędów, dopiero potem gra-test
+     - powtórki: słówka z błędami wracają w kolejnych lekcjach (pudełka jak w fiszkach)
+     - matematyka: przedmioty → kropki i ramka na dziesięć → cyfra; szybkie rozpoznawanie ilości; część + część = całość
+     - przy błędzie pokazujemy rozwiązanie (liczymy razem), a po słabym wyniku następna próba jest łatwiejsza
+     - nagroda (cukierki) krótka i tylko za dobry wynik, żeby nie przeklikiwać nauki */
   let run = null;
-  async function playLevel(epIdx, nodeIdx) {
+  const memKey = (kind, id) => kind + ':' + id;
+  function learned(kind, ids) { ids.forEach(id => { const k = memKey(kind, id); if (S.mem[k] == null) S.mem[k] = 0; }); save(); }
+  function recall(kind, id, ok) { const k = memKey(kind, id); S.mem[k] = ok ? Math.min(5, (S.mem[k] || 0) + 1) : 0; save(); }
+  const learnedOf = kind => Object.keys(S.mem).filter(k => k.startsWith(kind + ':')).map(k => k.slice(kind.length + 1));
+  const weakest = (kind, ids) => shuffle(ids).sort((a, b) => (S.mem[memKey(kind, a)] || 0) - (S.mem[memKey(kind, b)] || 0));
+  const epWords = ep => ep.nodes.filter(n => n.subj === 'en' && n.learn.t === 'words').flatMap(n => n.learn.words);
+  const nodeKey = (ep, i) => ep.id + ':' + i;
+
+  function itemOf(kind, id) {
+    if (kind === 'colors') { const c = COLORS.find(x => x.id === id); return { id, en: c.en, node: () => h('span', { class: 'balloon', style: `--c:${c.hex}` }) }; }
+    if (kind === 'shapes') { const s = SHAPES.find(x => x.id === id); return { id, en: s.en, node: () => shapeSvg(id, pick(COLORS).hex) }; }
+    const w = WORDS[id];
+    return { id, en: w[2], e: w[0], node: () => emojiCard(w[0]) };
+  }
+
+  function setPhase(ph) { $$('#phases span').forEach(s => s.classList.toggle('on', s.dataset.ph === ph)); }
+
+  async function playLesson(epIdx, nodeIdx) {
     const ep = EPISODES[epIdx], node = ep.nodes[nodeIdx];
-    const tasks = node.kind === 'boss'
-      ? node.p.tasks.map(([t, p]) => makeTask(t, p, ep))
-      : node.type === 'memory' ? [makeTask('memory', node.p, ep), makeTask('memory', node.p, ep)]
-        : Array.from({ length: 5 }, () => makeTask(node.type, node.p, ep));
-    const my = run = { closed: false };
+    const prog = epProg(ep.id), replay = !!prog.stars[nodeIdx];
+    const my = run = { closed: false, skip: false };
     show('level');
     $('#level').style.setProperty('--sky1', ep.sky[0]);
     $('#level').style.setProperty('--sky2', ep.sky[1]);
     $('#buddy').replaceChildren(petNode(S.activePet));
-    $('#stage').replaceChildren();
-    const bar = $('#lvBar');
-    bar.style.width = '0%';
-    if (node.kind === 'boss') {
-      $('#stage').append(h('div', { class: 'boss-owl bounce' }, '🦉'));
-      await say(T.boss);
+    const stage = $('#stage');
+    stage.replaceChildren();
+    $('#lvBar').style.width = '0%';
+    $('#phases').hidden = node.kind === 'boss';
+
+    if (node.kind === 'lesson') {
+      setPhase('learn');
+      $('#lvSkip').hidden = !replay;
+      await say(T.learnStart);
       if (my.closed) return;
+      await learnPhase(node, ep, stage, my);
+      if (my.closed) return;
+      $('#lvSkip').hidden = true;
+      if (node.subj === 'en') learned(node.learn.t, node.learn.words);
+      Voice.stop();
+      stage.replaceChildren(h('div', { class: 'big-icon bounce' }, '🎮'));
+      setPhase('game');
+      await say(T.gameStart);
+    } else {
+      stage.append(h('div', { class: 'big-icon bounce' }, '🦉'));
+      await say(T.boss);
     }
+    if (my.closed) return;
+
+    const ctx = { ep, node, easy: !!S.easy[nodeKey(ep, nodeIdx)] };
+    const tasks = node.test.map(([t, p]) => makeTask(t, p, ctx));
     let mistakes = 0;
     for (let k = 0; k < tasks.length; k++) {
       const t = tasks[k];
-      if (!S.tut[t.type] && T.tutorial[t.type]) {
-        S.tut[t.type] = true; save();
-        t.tutorial = T.tutorial[t.type];
-      }
-      mistakes += await t.run($('#stage'), my);
+      if (!S.tut[t.type] && T.tutorial[t.type]) { S.tut[t.type] = true; save(); t.tutorial = T.tutorial[t.type]; }
+      mistakes += await t.run(stage, my);
       if (my.closed) return;
-      bar.style.width = ((k + 1) / tasks.length * 100) + '%';
+      $('#lvBar').style.width = ((k + 1) / tasks.length * 100) + '%';
     }
     const stars = mistakes <= 1 ? 3 : mistakes <= 3 ? 2 : 1;
-    finishLevel(epIdx, nodeIdx, stars);
+    finishLesson(epIdx, nodeIdx, stars, my);
   }
   $('#lvClose').onclick = () => { Sfx.pop(); if (run) run.closed = true; Voice.stop(); openMap(); };
   $('#lvRepeat').onclick = () => { Sfx.pop(); Voice.repeat(); };
+  $('#lvSkip').onclick = () => { Sfx.pop(); if (run) { run.skip = true; Voice.stop(); run.wake && run.wake(); } };
 
   function buddy(mood) {
     const b = $('#buddy');
@@ -471,14 +514,234 @@
     if (mood === 'happy') hearts(b, 2);
   }
 
-  /* Zadanie z kartami do wyboru. Zwraca liczbę pomyłek. */
-  function choose(stage, my, { prompt, tutorial, show, cards, cls = '', okSay }) {
+  /* ---------- 📖 nauka ---------- */
+  // Pokazuje planszę, czyta ją i czeka na ▶. Dotknięcie planszy czyta jeszcze raz.
+  function step(stage, my, content, parts) {
+    return new Promise(async resolve => {
+      if (my.skip || my.closed) return resolve();
+      const next = h('button', { class: 'ok-btn next', 'aria-label': 'Dalej', hidden: true }, '▶');
+      const box = h('div', { class: 'learn-box pop' }, content);
+      box.onclick = () => { Sfx.pop(); boing(box); say(parts); };
+      stage.replaceChildren(box, next);
+      const finish = () => { my.wake = null; resolve(); };
+      my.wake = finish;
+      next.onclick = () => { Sfx.pop(); finish(); };
+      await say(parts);
+      next.hidden = false;
+    });
+  }
+  const wait = (my, ms) => (my.skip || my.closed ? Promise.resolve() : sleep(ms));
+  async function sayLit(my, els, partsFor) {
+    for (let i = 0; i < els.length; i++) {
+      if (my.skip || my.closed) return;
+      els[i].classList.add('lit');
+      await say(partsFor(i));
+    }
+  }
+  function waitNext(stage, my) {
+    return new Promise(resolve => {
+      if (my.skip || my.closed) return resolve();
+      const next = h('button', { class: 'ok-btn next', 'aria-label': 'Dalej' }, '▶');
+      stage.append(next);
+      my.wake = () => { my.wake = null; resolve(); };
+      next.onclick = () => { Sfx.pop(); my.wake(); };
+    });
+  }
+  function tenFrame(n, extra = 0) {
+    return h('div', { class: 'tframe' }, Array.from({ length: 10 }, (_, i) => h('span', { class: 'tf' + (i < n ? ' on' : i < n + extra ? ' add' : '') })));
+  }
+
+  async function learnPhase(node, ep, stage, my) {
+    const L = node.learn;
+    switch (L.t) {
+      case 'words': case 'colors': case 'shapes': {
+        const items = L.words.map(id => itemOf(L.t, id));
+        for (const it of items) {
+          await step(stage, my, h('div', { class: 'word-card' }, it.node(), h('span', { class: 'word-en' }, it.en)), [...T.word(it.en), ...T.word(it.en)]);
+        }
+        // nauka z podpowiedzią: wybór z dwóch, błąd od razu pokazuje dobrą odpowiedź
+        for (const it of shuffle(items)) {
+          if (my.skip || my.closed) return;
+          const other = pick(items.filter(x => x !== it));
+          await choose(stage, my, { prompt: T.word(it.en), guided: true, cards: shuffle([it, other]).map(x => ({ node: x.node(), ok: x === it, wrongSay: T.word(x.en) })) });
+        }
+        return;
+      }
+      case 'numbers': {
+        const e = pick(ep.emo);
+        for (let n = L.from; n <= L.to; n++) {
+          await step(stage, my, h('div', { class: 'num-card' }, h('span', { class: 'big-digit' }, n), tenFrame(n), row(n, e)), T.numBoth(n));
+        }
+        for (let n = L.from; n <= L.to; n++) {
+          if (my.skip || my.closed) return;
+          const other = n === L.from ? n + 1 : n - 1;
+          await choose(stage, my, { prompt: T.word(EN_NUM[n]), guided: true, cards: shuffle([n, other]).map(c => ({ node: dots(c), ok: c === n, wrongSay: T.word(EN_NUM[c]) })) });
+        }
+        return;
+      }
+      case 'onetoone': {
+        const e = pick(ep.emo), r = row(4, e, 'tap-row');
+        stage.replaceChildren(h('div', { class: 'learn-box' }, r));
+        await say(T.learn.onetoone);
+        await sayLit(my, $$('.it', r), i => T.num(i + 1));
+        if (my.skip || my.closed) return;
+        $$('.it', r).forEach(x => x.classList.remove('lit'));
+        await say(T.learn.tapEach);
+        await new Promise(resolve => {
+          let k = 0;
+          my.wake = resolve;
+          $$('.it', r).forEach(x => {
+            x.onclick = async () => {
+              if (x.classList.contains('lit')) return;
+              x.classList.add('lit'); Sfx.pop(); k++;
+              if (k < 4) say(T.num(k)); else { Sfx.good(); buddy('happy'); await say(T.numBoth(4)); resolve(); }
+            };
+          });
+        });
+        return;
+      }
+      case 'more': {
+        const e = pick(ep.emo);
+        const top = h('div', { class: 'pairs-row' }, Array.from({ length: 5 }, () => h('span', { class: 'it' }, e)));
+        const bot = h('div', { class: 'pairs-row' }, Array.from({ length: 3 }, () => h('span', { class: 'it' }, e)));
+        stage.replaceChildren(h('div', { class: 'learn-box pairs' }, top, bot));
+        await say(T.learn.moreA);
+        for (let i = 0; i < 3; i++) { if (my.skip || my.closed) return; top.children[i].classList.add('paired'); bot.children[i].classList.add('paired'); Sfx.pop(); await wait(my, 450); }
+        top.children[3].classList.add('lit'); top.children[4].classList.add('lit');
+        await say(T.learn.moreB);
+        if (my.skip || my.closed) return;
+        bot.classList.add('lit-row');
+        await say(T.learn.lessB);
+        await waitNext(stage, my);
+        return;
+      }
+      case 'pattern': {
+        const pool = shuffle(learnedOf('words').concat(epWords(ep))).filter((v, i, a) => a.indexOf(v) === i);
+        const letters = [...new Set(L.kind)], map = {};
+        letters.forEach((l, i) => { map[l] = WORDS[pool[i]] || WORDS[epWords(ep)[i]]; });
+        const seq = []; while (seq.length < L.kind.length * 2 + 1) seq.push(map[L.kind[seq.length % L.kind.length]]);
+        const els = seq.map((w, i) => h('span', { class: 'it' + (i === seq.length - 1 ? ' q' : '') }, i === seq.length - 1 ? '?' : w[0]));
+        stage.replaceChildren(h('div', { class: 'learn-box' }, h('div', { class: 'seq' }, els)));
+        await say(T.learn.pattern);
+        await sayLit(my, els.slice(0, -1), i => T.word(seq[i][2]));
+        if (my.skip || my.closed) return;
+        const last = els[els.length - 1];
+        last.textContent = seq[seq.length - 1][0]; last.classList.remove('q'); last.classList.add('lit', 'boing');
+        Sfx.good();
+        await say([...T.word(seq[seq.length - 1][2]), ...T.learn.patternEnd]);
+        await waitNext(stage, my);
+        return;
+      }
+      case 'subitize': {
+        for (const [i, n] of [2, 3, 5].entries()) {
+          if (my.skip || my.closed) return;
+          const d = dots(n);
+          const card = h('div', { class: 'flash-card' }, d);
+          stage.replaceChildren(h('div', { class: 'learn-box' }, card));
+          await say(i === 0 ? T.learn.subitize : T.ask.flash);
+          await wait(my, 300);
+          card.classList.add('covered');
+          await wait(my, 900);
+          card.classList.remove('covered');
+          await say(T.numBoth(n));
+          await waitNext(stage, my);
+        }
+        return;
+      }
+      case 'odd': {
+        const fr = shuffle(GROUPS.fruit).slice(0, 3), odd = pick(GROUPS.animals);
+        const els = [...fr, odd].map(x => h('span', { class: 'it' }, x));
+        stage.replaceChildren(h('div', { class: 'learn-box' }, h('div', { class: 'row' }, els)));
+        els.slice(0, 3).forEach(x => x.classList.add('lit'));
+        await say(T.learn.oddA);
+        if (my.skip || my.closed) return;
+        els[3].classList.add('odd-mark', 'boing');
+        Sfx.oops();
+        await say(T.learn.oddB);
+        await waitNext(stage, my);
+        return;
+      }
+      case 'tenframe': {
+        const f = tenFrame(0);
+        stage.replaceChildren(h('div', { class: 'learn-box' }, f));
+        await say(T.learn.frameA);
+        const cells = $$('.tf', f);
+        for (let i = 0; i < 10; i++) { if (my.skip || my.closed) return; cells[i].classList.add('on'); Sfx.pop(); await say(T.num(i + 1)); }
+        await step(stage, my, tenFrame(7), T.learn.frameB);
+        return;
+      }
+      case 'add': {
+        const e = pick(ep.emo);
+        for (const [a, b] of L.ex) {
+          if (my.skip || my.closed) return;
+          const ga = row(a, e, 'grp'), gb = row(b, e, 'grp');
+          const box = h('div', { class: 'learn-box' }, h('div', { class: 'sum' }, ga, h('span', { class: 'op' }, '+'), gb));
+          stage.replaceChildren(box);
+          const [p1, p2] = T.addEx(a, b);
+          await say([p1]);
+          if (my.skip || my.closed) return;
+          box.replaceChildren(h('div', { class: 'sum' }, row(a + b, e, 'grp merged pop'), h('span', { class: 'op' }, '='), h('span', { class: 'big-digit' }, a + b)));
+          Sfx.good();
+          await say([p2]);
+          await waitNext(stage, my);
+        }
+        return;
+      }
+      case 'counton': {
+        const f = tenFrame(5, 3);
+        stage.replaceChildren(h('div', { class: 'learn-box' }, f));
+        await say(T.learn.counton);
+        await waitNext(stage, my);
+        return;
+      }
+      case 'sub': {
+        const [a, b] = L.ex, e = pick(ep.emo);
+        const r = row(a, e);
+        stage.replaceChildren(h('div', { class: 'learn-box' }, r));
+        const [p1, p2, p3] = T.subEx(a, b);
+        await say([p1]);
+        if (my.skip || my.closed) return;
+        $$('.it', r).slice(-b).forEach(x => x.classList.add('fly'));
+        Sfx.flip();
+        await say([p2]);
+        await wait(my, 400);
+        $$('.it', r).filter(x => !x.classList.contains('fly')).forEach(x => x.classList.add('lit'));
+        await say([p3]);
+        await waitNext(stage, my);
+        return;
+      }
+      case 'size': {
+        const e = pick(ep.emo);
+        const els = [0.5, 0.8, 1.2].map(s => h('span', { class: 'it sized', style: `font-size:calc(var(--card-emoji) * ${s})` }, e));
+        stage.replaceChildren(h('div', { class: 'learn-box' }, h('div', { class: 'sizes-row' }, els)));
+        const lines = [T.learn.sizeSmall, T.learn.sizeMid, T.learn.sizeBig];
+        await sayLit(my, els, i => lines[i]);
+        await waitNext(stage, my);
+        return;
+      }
+      case 'bonds': {
+        const f = tenFrame(6);
+        stage.replaceChildren(h('div', { class: 'learn-box' }, f));
+        await say(T.learn.bondA);
+        const cells = $$('.tf', f).slice(6);
+        for (let i = 0; i < 4; i++) { if (my.skip || my.closed) return; cells[i].classList.add('add'); Sfx.pop(); await say(T.num(i + 1)); }
+        await say(T.learn.bondB);
+        await waitNext(stage, my);
+        return;
+      }
+    }
+  }
+
+  /* ---------- 🎮 gra-test: zadania ---------- */
+  // Zadanie z kartami do wyboru. Zwraca liczbę pomyłek.
+  function choose(stage, my, { prompt, tutorial, show, cards, cls = '', okSay, teach, guided }) {
     return new Promise(async resolve => {
       stage.replaceChildren();
       if (show) stage.append(h('div', { class: 'show' }, show));
       const grid = h('div', { class: `cards n${cards.length} ${cls}` });
       stage.append(grid);
       let m = 0, done = false;
+      if (guided) my.wake = () => { done = true; resolve(0); };
       cards.forEach((c, i) => {
         const b = h('button', { class: 'card pop', style: `animation-delay:${i * 0.06}s` }, c.node);
         if (c.ok) b.dataset.ok = '1';
@@ -487,19 +750,32 @@
           if (c.ok) {
             done = true; b.classList.add('right'); Sfx.good(); buddy('happy');
             await say(okSay || pick(T.praise));
-            await sleep(300);
+            await sleep(250);
             resolve(m);
             return;
           }
           m++; Sfx.oops(); buddy('sad');
           b.classList.add('wrong', 'dim');
-          if (c.wrongSay) say(c.wrongSay);
-          if (m >= 2) $('[data-ok]', grid).classList.add('hint');
+          if (guided || m >= 2) $('[data-ok]', grid).classList.add('hint');
+          if (teach && m === 1) {
+            await say(T.countAlong);
+            await teach(stage, my);
+            if (!done && !my.closed) say(prompt);
+          } else if (c.wrongSay) say(c.wrongSay);
         };
         grid.append(b);
       });
       await say([...(tutorial || []), ...prompt]);
     });
+  }
+  async function countAlong(stage, my) {
+    const its = $$('.show .it:not(.gone), .show .tf.on, .show .tf.add', stage);
+    $$('.lit', stage).forEach(x => x.classList.remove('lit'));
+    for (let i = 0; i < its.length; i++) {
+      if (my.closed) return;
+      its[i].classList.add('lit');
+      await say(T.num(i + 1));
+    }
   }
 
   const emojiCard = e => h('span', { class: 'emoji' }, e);
@@ -512,9 +788,7 @@
     for (let v = lo; set.size < 3 && v <= hi; v++) set.add(v);
     return shuffle([...set]);
   }
-  function dots(n) {
-    return h('span', { class: 'dots d' + n }, Array.from({ length: n }, () => h('i')));
-  }
+  const dots = n => h('span', { class: 'dots d' + n }, Array.from({ length: n }, () => h('i')));
   function shapeSvg(id, color) {
     const paths = {
       circle: '<circle cx="50" cy="50" r="40"/>',
@@ -527,51 +801,90 @@
     return h('span', { class: 'shape', html: `<svg viewBox="0 0 100 100" fill="${color}" stroke="#2B2140" stroke-width="5" stroke-linejoin="round">${paths[id]}</svg>` });
   }
 
-  function makeTask(type, p, ep) {
-    const words = ep.words.map(id => WORDS[id]);
+  // Zestaw do zadań ze słówek: cel z bieżącej lekcji albo powtórka najsłabszych, reszta z poznanych.
+  function vocab(kind, ctx, review) {
+    const { node, ep } = ctx;
+    const focus = node.kind === 'lesson' && node.learn.t === kind ? node.learn.words
+      : kind === 'words' ? epWords(ep).filter(id => learnedOf('words').includes(id)) : learnedOf(kind);
+    const base = focus.length ? focus : kind === 'words' ? epWords(ep) : kind === 'colors' ? COLORS.slice(0, 4).map(c => c.id) : SHAPES.slice(0, 3).map(s => s.id);
+    let target = pick(base);
+    if (review) { const pool = learnedOf(kind).filter(id => !(node.learn && node.learn.words.includes(id))); if (pool.length) target = weakest(kind, pool)[0]; }
+    const known = [...new Set([...base, ...learnedOf(kind)])].filter(id => kind !== 'words' || WORDS[id]);
+    const all = kind === 'words' ? epWords(ep) : kind === 'colors' ? COLORS.map(c => c.id) : SHAPES.map(s => s.id);
+    return { target, others: n => {
+      const o = shuffle(known.filter(id => id !== target)).slice(0, n);
+      shuffle(all).forEach(id => { if (o.length < n && id !== target && !o.includes(id)) o.push(id); });
+      return o;
+    } };
+  }
+
+  function makeTask(type, p, ctx) {
+    const { ep } = ctx;
+    const easy = ctx.easy;
+    const nOf = n => Math.max(2, n - (easy ? 1 : 0));
+    const maxOf = mx => (easy ? Math.max(3, Math.round(mx * 0.7)) : mx);
     const emo = () => pick(ep.emo);
     const t = { type };
     const go = fn => { t.run = (stage, my) => fn(stage, my, t); return t; };
+    const vocabTask = kind => go(async (stage, my) => {
+      const v = vocab(kind, ctx, p.review), target = itemOf(kind, v.target);
+      const opts = shuffle([target, ...v.others(nOf(p.n) - 1).map(id => itemOf(kind, id))]);
+      const m = await choose(stage, my, {
+        tutorial: t.tutorial, prompt: T.word(target.en), cls: kind === 'colors' ? 'balloons' : '',
+        cards: opts.map(o => ({ node: o.node(), ok: o === target, wrongSay: T.word(o.en) })),
+      });
+      recall(kind, v.target, m === 0);
+      return m;
+    });
     switch (type) {
-      case 'listen': return go((stage, my) => {
-        const opts = shuffle(words).slice(0, p.n), w = pick(opts);
-        return choose(stage, my, {
-          tutorial: t.tutorial, prompt: T.word(w[2]),
-          cards: opts.map(o => ({ node: emojiCard(o[0]), ok: o === w, wrongSay: T.word(o[2]) })),
-        });
-      });
-      case 'colors': return go((stage, my) => {
-        const opts = shuffle(COLORS).slice(0, p.n), c = pick(opts);
-        return choose(stage, my, {
-          tutorial: t.tutorial, prompt: T.word(c.en), cls: 'balloons',
-          cards: opts.map(o => ({ node: h('span', { class: 'balloon', style: `--c:${o.hex}` }), ok: o === c, wrongSay: T.word(o.en) })),
-        });
-      });
-      case 'shapes': return go((stage, my) => {
-        const opts = shuffle(SHAPES.slice(0, p.set)).slice(0, p.n), sh = pick(opts);
-        const cols = shuffle(COLORS);
-        return choose(stage, my, {
-          tutorial: t.tutorial, prompt: T.word(sh.en),
-          cards: opts.map((o, i) => ({ node: shapeSvg(o.id, cols[i].hex), ok: o === sh, wrongSay: T.word(o.en) })),
-        });
-      });
+      case 'listen': return vocabTask('words');
+      case 'colors': return vocabTask('colors');
+      case 'shapes': return vocabTask('shapes');
       case 'numEN': return go((stage, my) => {
-        const n = rint(1, p.max);
+        const mx = maxOf(p.max), n = rint(1, mx);
         return choose(stage, my, {
           tutorial: t.tutorial, prompt: T.word(EN_NUM[n]),
-          cards: numChoices(n, 1, p.max < 3 ? 3 : p.max).map(c => ({ node: dots(c), ok: c === n, wrongSay: T.word(EN_NUM[c]) })),
+          cards: numChoices(n, 1, Math.max(3, mx)).map(c => ({ node: dots(c), ok: c === n, wrongSay: T.word(EN_NUM[c]) })),
         });
       });
       case 'count': return go((stage, my) => {
-        const n = rint(1, p.max), e = emo();
+        const mx = maxOf(p.max), n = rint(1, mx);
         return choose(stage, my, {
-          tutorial: t.tutorial, prompt: T.ask.count, show: row(n, e),
-          cards: numChoices(n, 1, Math.max(3, p.max)).map(c => ({ node: digitCard(c), ok: c === n })), okSay: T.numBoth(n),
+          tutorial: t.tutorial, prompt: T.ask.count, show: row(n, emo()), teach: countAlong,
+          cards: numChoices(n, 1, Math.max(3, mx)).map(c => ({ node: digitCard(c), ok: c === n })), okSay: T.numBoth(n),
+        });
+      });
+      case 'frame': return go((stage, my) => {
+        const n = rint(3, maxOf(p.max));
+        return choose(stage, my, {
+          prompt: T.ask.count, show: tenFrame(n), teach: countAlong, okSay: T.numBoth(n),
+          cards: numChoices(n, 1, 10).map(c => ({ node: digitCard(c), ok: c === n })),
+        });
+      });
+      case 'flash': return go((stage, my) => {
+        const n = rint(1, maxOf(p.max)), card = h('div', { class: 'flash-card' }, dots(n));
+        setTimeout(() => card.classList.add('covered'), 1600);
+        return choose(stage, my, {
+          prompt: T.ask.flash, show: card, okSay: T.numBoth(n),
+          teach: async (st, my2) => { card.classList.remove('covered'); await countAlongDots(card, my2); },
+          cards: numChoices(n, 1, Math.max(3, p.max)).map(c => ({ node: digitCard(c), ok: c === n })),
+        });
+      });
+      case 'bond': return go((stage, my) => {
+        const n = rint(easy ? 6 : 3, 9);
+        return choose(stage, my, {
+          prompt: T.ask.bond, show: tenFrame(n), okSay: [...T.numBoth(10 - n)],
+          teach: async (st, my2) => {
+            const empty = $$('.show .tf:not(.on)', st);
+            for (let i = 0; i < empty.length; i++) { if (my2.closed) return; empty[i].classList.add('add'); await say(T.num(i + 1)); }
+          },
+          cards: numChoices(10 - n, 1, 9).map(c => ({ node: digitCard(c), ok: c === 10 - n })),
         });
       });
       case 'compare': return go((stage, my) => {
-        let a = rint(1, p.max), b = rint(1, p.max);
-        while (Math.abs(a - b) < 2) { a = rint(1, p.max); b = rint(1, p.max); }
+        const mx = maxOf(p.max);
+        let a = rint(1, mx), b = rint(1, mx);
+        while (Math.abs(a - b) < 2) { a = rint(1, mx); b = rint(1, mx); }
         const less = p.less && Math.random() < 0.4, win = less ? Math.min(a, b) : Math.max(a, b), e = emo();
         return choose(stage, my, {
           prompt: less ? T.ask.less : T.ask.more, cls: 'wide',
@@ -588,52 +901,50 @@
       });
       case 'pattern': return go((stage, my) => {
         const kind = pick(p.kinds), letters = [...new Set(kind)];
-        const pool = shuffle([...ep.emo, ...GROUPS.fruit, ...GROUPS.toys]);
+        const pool = shuffle([...ep.emo, ...GROUPS.fruit, ...GROUPS.toys]).filter((v, i, a) => a.indexOf(v) === i);
         const map = {}; letters.forEach((l, i) => { map[l] = pool[i]; });
         const seq = [];
         while (seq.length < Math.max(6, kind.length * 2 + 1)) seq.push(map[kind[seq.length % kind.length]]);
         const answer = seq.pop();
-        const others = shuffle([...new Set([...letters.map(l => map[l]), pool[letters.length]])].filter(x => x !== answer)).slice(0, 2);
+        const others = shuffle([...new Set([...letters.map(l => map[l]), pool[letters.length]])].filter(v => v !== answer)).slice(0, 2);
         return choose(stage, my, {
           prompt: T.ask.pattern,
-          show: h('div', { class: 'seq' }, seq.map(x => h('span', { class: 'it' }, x)), h('span', { class: 'it q' }, '?')),
-          cards: shuffle([answer, ...others]).map(x => ({ node: emojiCard(x), ok: x === answer })),
+          show: h('div', { class: 'seq' }, seq.map(v => h('span', { class: 'it' }, v)), h('span', { class: 'it q' }, '?')),
+          cards: shuffle([answer, ...others]).map(v => ({ node: emojiCard(v), ok: v === answer })),
         });
       });
       case 'odd': return go((stage, my) => {
         const [ga, gb] = shuffle(Object.keys(GROUPS));
-        const items = shuffle(GROUPS[ga]).slice(0, p.n - 1), odd = pick(GROUPS[gb]);
-        return choose(stage, my, {
-          prompt: T.ask.odd,
-          cards: shuffle([...items, odd]).map(x => ({ node: emojiCard(x), ok: x === odd })),
-        });
+        const n = nOf(p.n) < 3 ? 3 : nOf(p.n);
+        const items = shuffle(GROUPS[ga]).slice(0, n - 1), odd = pick(GROUPS[gb]);
+        return choose(stage, my, { prompt: T.ask.odd, cards: shuffle([...items, odd]).map(v => ({ node: emojiCard(v), ok: v === odd })) });
       });
       case 'add': return go((stage, my) => {
-        const s = rint(2, p.max), a = rint(1, s - 1), b = s - a, e = emo();
+        const s = rint(2, maxOf(p.max)), a = rint(1, s - 1), b = s - a, e = emo();
         return choose(stage, my, {
-          prompt: T.ask.add, okSay: T.numBoth(s),
+          prompt: T.ask.add, okSay: T.numBoth(s), teach: countAlong,
           show: h('div', { class: 'sum' }, row(a, e, 'grp'), h('span', { class: 'op' }, '+'), row(b, e, 'grp')),
           cards: numChoices(s, 1, 10).map(c => ({ node: digitCard(c), ok: c === s })),
         });
       });
       case 'sub': return go(async (stage, my) => {
-        const n = rint(3, p.max), k = rint(1, n - 1), e = emo();
+        const n = rint(3, maxOf(p.max)), k = rint(1, n - 1), e = emo();
         stage.replaceChildren(h('div', { class: 'show' }, row(n, e)));
         await say(t.tutorial || []);
-        await sleep(700);
+        await sleep(600);
         if (my.closed) return 0;
         const its = $$('.it', stage);
         shuffle(its).slice(0, k).forEach(x => x.classList.add('fly'));
         Sfx.flip();
         await sleep(1000);
-        const show = h('div', { class: 'show' }, h('div', { class: 'row' }, its.map(x => h('span', { class: x.classList.contains('fly') ? 'it gone' : 'it' }, e))));
+        const show = h('div', { class: 'row' }, its.map(x => h('span', { class: x.classList.contains('fly') ? 'it gone' : 'it' }, e)));
         return choose(stage, my, {
-          prompt: T.ask.sub, show, okSay: T.numBoth(n - k),
+          prompt: T.ask.sub, show, okSay: T.numBoth(n - k), teach: countAlong,
           cards: numChoices(n - k, 1, 10).map(c => ({ node: digitCard(c), ok: c === n - k })),
         });
       });
       case 'tapN': return go((stage, my) => new Promise(async resolve => {
-        const n = rint(1, p.max), total = Math.min(10, n + 3), food = emo();
+        const n = rint(1, maxOf(p.max)), total = Math.min(10, n + 3), food = emo();
         const pile = h('div', { class: 'pile' }), bowl = h('div', { class: 'bowl-in' });
         const ok = h('button', { class: 'ok-btn pop', 'aria-label': 'Gotowe' }, '✔');
         const pet = h('div', { class: 'feed-pet' }, petNode(S.activePet));
@@ -655,7 +966,7 @@
             done = true; Sfx.chomp(); buddy('happy'); hearts(pet, 4); boing(pet);
             bowl.classList.add('eaten');
             await say(T.numBoth(n));
-            await sleep(300);
+            await sleep(250);
             resolve(m);
             return;
           }
@@ -665,7 +976,9 @@
         say([...(t.tutorial || []), ...T.give(n)]);
       }));
       case 'memory': return go((stage, my) => new Promise(resolve => {
-        const pairs = shuffle(words).slice(0, p.pairs);
+        const v = vocab('words', ctx, false);
+        const ids = [...new Set([v.target, ...v.others(9)])];
+        const pairs = shuffle(ids).slice(0, Math.min(nOf(p.pairs), ids.length)).map(id => WORDS[id]);
         const deck = shuffle([...pairs, ...pairs]);
         const grid = h('div', { class: 'memory m' + deck.length });
         stage.replaceChildren(grid);
@@ -681,7 +994,7 @@
             if (w1 === w2) {
               found++; c1.classList.add('match'); c2.classList.add('match'); buddy('happy');
               setTimeout(() => Sfx.good(), 250);
-              if (found === pairs.length) { await sleep(900); if (!my.closed) { await say(pick(T.praise)); resolve(Math.max(0, Math.floor((misses - p.pairs) / 2))); } }
+              if (found === pairs.length) { await sleep(900); if (!my.closed) { await say(pick(T.praise)); resolve(Math.max(0, Math.floor((misses - pairs.length) / 2))); } }
             } else {
               misses++; busy = true;
               await sleep(1100);
@@ -695,35 +1008,183 @@
     }
     throw new Error('Nieznane zadanie: ' + type);
   }
+  async function countAlongDots(card, my) {
+    const ds = $$('.dots i', card);
+    for (let i = 0; i < ds.length; i++) { if (my.closed) return; ds[i].classList.add('lit'); await say(T.num(i + 1)); }
+  }
 
-  /* ---------- koniec poziomu ---------- */
-  async function finishLevel(epIdx, nodeIdx, stars) {
+  /* ---------- 🍬 nagroda: cukierki trzy w rzędzie ---------- */
+  function candyGame(stage, my) {
+    return new Promise(resolve => {
+      const N = 6, types = CANDY;
+      let grid = [], score = 0, moves = 10, busy = false, sel = null, start = null;
+      const movesEl = h('span', { class: 'candy-moves' }), scoreEl = h('span', { class: 'candy-score' });
+      const board = h('div', { class: 'candy-board' });
+      const cells = [];
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+        const el = h('span', { class: 'cell', 'data-r': r, 'data-c': c });
+        cells.push(el); board.append(el);
+      }
+      stage.replaceChildren(h('div', { class: 'candy-hud' }, movesEl, scoreEl), board);
+      const at = (r, c) => cells[r * N + c];
+      function fill() {
+        grid = [];
+        for (let r = 0; r < N; r++) {
+          grid.push([]);
+          for (let c = 0; c < N; c++) {
+            let t;
+            do { t = pick(types); } while ((c >= 2 && grid[r][c - 1] === t && grid[r][c - 2] === t) || (r >= 2 && grid[r - 1][c] === t && grid[r - 2][c] === t));
+            grid[r].push(t);
+          }
+        }
+      }
+      function matches() {
+        const m = new Set();
+        for (let r = 0; r < N; r++) for (let c = 0; c < N - 2; c++) if (grid[r][c] && grid[r][c] === grid[r][c + 1] && grid[r][c] === grid[r][c + 2]) [0, 1, 2].forEach(k => m.add(r * N + c + k));
+        for (let c = 0; c < N; c++) for (let r = 0; r < N - 2; r++) if (grid[r][c] && grid[r][c] === grid[r + 1][c] && grid[r][c] === grid[r + 2][c]) [0, 1, 2].forEach(k => m.add((r + k) * N + c));
+        return m;
+      }
+      const swapG = (a, b) => { const t = grid[a[0]][a[1]]; grid[a[0]][a[1]] = grid[b[0]][b[1]]; grid[b[0]][b[1]] = t; };
+      function findMove() {
+        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) for (const [dr, dc] of [[0, 1], [1, 0]]) {
+          const r2 = r + dr, c2 = c + dc;
+          if (r2 >= N || c2 >= N) continue;
+          swapG([r, c], [r2, c2]); const ok = matches().size > 0; swapG([r, c], [r2, c2]);
+          if (ok) return [[r, c], [r2, c2]];
+        }
+        return null;
+      }
+      const hasMove = () => !!findMove();
+      // po 5 s bez ruchu mrugają dwa cukierki, które można zamienić
+      let idle;
+      const nudge = () => {
+        clearTimeout(idle);
+        $$('.hintc', board).forEach(x => x.classList.remove('hintc'));
+        idle = setTimeout(() => { const mv = !busy && moves > 0 && board.isConnected && findMove(); if (mv) mv.forEach(p => at(...p).classList.add('hintc')); }, 5000);
+      };
+      function render(fresh = new Set()) {
+        for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+          const el = at(r, c);
+          el.textContent = grid[r][c] || '';
+          el.className = 'cell' + (fresh.has(r * N + c) ? ' drop' : '');
+        }
+        movesEl.textContent = `👆 ${moves}`;
+        scoreEl.textContent = `🍬 ${score}`;
+      }
+      async function cascade() {
+        let combo = 0;
+        for (;;) {
+          const m = matches();
+          if (!m.size) break;
+          combo++; score += m.size;
+          m.forEach(i => cells[i].classList.add('popc'));
+          Sfx.good();
+          if (combo === 2) say(pick(T.combo));
+          await sleep(280);
+          m.forEach(i => { grid[Math.floor(i / N)][i % N] = null; });
+          const fresh = new Set();
+          for (let c = 0; c < N; c++) {
+            const col = [];
+            for (let r = N - 1; r >= 0; r--) if (grid[r][c]) col.push(grid[r][c]);
+            for (let r = N - 1, k = 0; r >= 0; r--, k++) {
+              if (k < col.length) grid[r][c] = col[k];
+              else { grid[r][c] = pick(types); fresh.add(r * N + c); }
+            }
+          }
+          render(fresh);
+          await sleep(300);
+        }
+      }
+      async function trySwap(a, b) {
+        if (busy || moves <= 0) return;
+        busy = true;
+        swapG(a, b); render();
+        if (!matches().size) {
+          Sfx.oops();
+          at(...a).classList.add('nope'); at(...b).classList.add('nope');
+          await sleep(300);
+          swapG(a, b); render();
+          busy = false;
+          return;
+        }
+        moves--;
+        await cascade();
+        if (!hasMove()) { fill(); render(new Set(cells.map((_, i) => i))); }
+        busy = false;
+        if (moves <= 0) end();
+      }
+      async function end() {
+        await sleep(500);
+        if (my.closed) return;
+        const treats = Math.max(2, Math.round(score / 6));
+        Sfx.fanfare(); confetti(80);
+        const next = h('button', { class: 'ok-btn', 'aria-label': 'Dalej' }, '▶');
+        stage.replaceChildren(h('div', { class: 'candy-end pop' }, h('div', { class: 'big-icon bounce' }, petNode(S.activePet)), h('div', { class: 'treat-gain' }, `+${treats} 🍪`)), next);
+        say(T.rewardEnd);
+        next.onclick = () => { Sfx.pop(); resolve(treats); };
+      }
+      const cellOf = el => { const c = el && el.closest && el.closest('.cell'); return c ? [+c.dataset.r, +c.dataset.c] : null; };
+      board.addEventListener('pointerdown', e => { nudge(); start = { cell: cellOf(e.target), x: e.clientX, y: e.clientY }; });
+      board.addEventListener('pointerup', e => {
+        if (!start || !start.cell) return;
+        const dx = e.clientX - start.x, dy = e.clientY - start.y, a = start.cell;
+        start = null;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) > 18) {
+          const b = Math.abs(dx) > Math.abs(dy) ? [a[0], a[1] + Math.sign(dx)] : [a[0] + Math.sign(dy), a[1]];
+          if (b[0] >= 0 && b[0] < N && b[1] >= 0 && b[1] < N) { sel = null; $$('.sel', board).forEach(x => x.classList.remove('sel')); trySwap(a, b); }
+          return;
+        }
+        if (sel && Math.abs(sel[0] - a[0]) + Math.abs(sel[1] - a[1]) === 1) { const s = sel; sel = null; $$('.sel', board).forEach(x => x.classList.remove('sel')); trySwap(s, a); return; }
+        $$('.sel', board).forEach(x => x.classList.remove('sel'));
+        sel = a; at(...a).classList.add('sel'); Sfx.pop();
+      });
+      fill();
+      while (!hasMove()) fill();
+      render(new Set(cells.map((_, i) => i)));
+      nudge();
+      window.__candy = { grid: () => grid, trySwap, N };
+    });
+  }
+
+  /* ---------- koniec lekcji ---------- */
+  async function finishLesson(epIdx, nodeIdx, stars, my) {
     const ep = EPISODES[epIdx], node = ep.nodes[nodeIdx], prog = epProg(ep.id);
     const firstTime = !prog.stars[nodeIdx];
     prog.stars[nodeIdx] = Math.max(prog.stars[nodeIdx] || 0, stars);
+    S.easy[nodeKey(ep, nodeIdx)] = stars === 1;
     S.treats += stars;
     save();
     const s = openSheet({ cls: 'sheet-result', closable: false });
     const starEls = [0, 1, 2].map(() => h('span', { class: 'rstar' }, '⭐'));
-    s.body.append(h('div', { class: 'rstars' }, starEls), h('div', { class: 'treat-gain' }, `+${stars} 🍪`));
+    s.body.append(h('div', { class: 'rstars' }, starEls));
     for (let i = 0; i < 3; i++) {
       await sleep(350);
       if (i < stars) { starEls[i].classList.add('on'); Sfx.star(i); } else starEls[i].classList.add('off');
     }
     if (stars === 3) confetti(60);
-    say(T.done[stars - 1]);
+    await say(T.done[stars - 1]);
+    const toMap = () => { closeSheet(true); openMap({ walkFrom: firstTime ? nodeIdx : null }); };
 
-    if (node.kind === 'boss' && firstTime) {
-      await sleep(1600);
-      bossReward(epIdx);
+    if (stars >= 2 || node.kind === 'boss') {
+      await sleep(500);
+      closeSheet(true);
+      if (my.closed) return;
+      setPhase('reward'); $('#phases').hidden = false;
+      $('#lvBar').style.width = '100%';
+      say(S.tut.candy ? T.reward : T.rewardFirst);
+      S.tut.candy = true; save();
+      const treats = await candyGame($('#stage'), my);
+      S.treats += treats; save();
+      if (my.closed) return;
+      if (node.kind === 'boss' && firstTime) { bossReward(epIdx); return; }
+      openMap({ walkFrom: firstTime ? nodeIdx : null });
       return;
     }
-    const goMap = () => { closeSheet(true); openMap({ walkFrom: firstTime ? nodeIdx : null }); };
-    const btns = h('div', { class: 'result-btns' },
-      h('button', { class: 'round-btn big', 'aria-label': 'Jeszcze raz', onclick: () => { Sfx.pop(); closeSheet(true); playLevel(epIdx, nodeIdx); } }, '↻'),
-      h('button', { class: 'ok-btn', 'aria-label': 'Dalej', onclick: () => { Sfx.pop(); goMap(); } }, '▶'),
-    );
-    s.body.append(btns);
+    say(T.tryLearn);
+    s.body.append(h('div', { class: 'result-btns' },
+      h('button', { class: 'round-btn big', 'aria-label': 'Dalej', onclick: () => { Sfx.pop(); toMap(); } }, '▶'),
+      h('button', { class: 'ok-btn retry', 'aria-label': 'Jeszcze raz', onclick: () => { Sfx.pop(); closeSheet(true); playLesson(epIdx, nodeIdx); } }, '↻'),
+    ));
   }
 
   async function bossReward(epIdx) {

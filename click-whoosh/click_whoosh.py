@@ -191,9 +191,31 @@ def log(msg):
     print(f"{datetime.datetime.now():%H:%M:%S} {msg}", flush=True)
 
 
+class PressFilter:
+    """Odsiewa to samo naciśnięcie zgłoszone przez obie części Clicka.
+
+    Odblokowana lewa część przekazuje też przyciski prawej, więc jedno
+    naciśnięcie przychodzi dwa razy z różnych urządzeń w odstępie milisekund.
+    """
+
+    WINDOW = 0.3  # sekundy
+
+    def __init__(self):
+        self.last = {}  # przycisk -> (adres urządzenia, czas)
+
+    def accept(self, button, address):
+        now = time.monotonic()
+        prev = self.last.get(button)
+        if prev and prev[0] != address and now - prev[1] < self.WINDOW:
+            return False
+        self.last[button] = (address, now)
+        return True
+
+
 class ClickConnection:
-    def __init__(self, device, type_name, keys, debug):
+    def __init__(self, device, type_name, keys, presses, debug):
         self.device = device
+        self.presses = presses
         self.name = f"{type_name} [{device.address}]"
         self.keys = keys
         self.debug = debug
@@ -213,6 +235,10 @@ class ClickConnection:
         new = buttons - self.held
         self.held = buttons
         for button in sorted(new):
+            if not self.presses.accept(button, self.device.address):
+                if self.debug:
+                    log(f"{self.name} przycisk: {button} (duplikat, pomijam)")
+                continue
             key = MAPPING.get(button)
             log(f"{self.name} przycisk: {button}" + (f" -> klawisz {key}" if key else ""))
             if key:
@@ -248,10 +274,10 @@ async def find_zwift_devices(timeout):
     return result
 
 
-async def keep_connected(device, type_name, keys, debug):
+async def keep_connected(device, type_name, keys, presses, debug):
     while True:
         try:
-            await ClickConnection(device, type_name, keys, debug).run()
+            await ClickConnection(device, type_name, keys, presses, debug).run()
         except Exception as e:  # BLE na Windows potrafi zgłaszać różne błędy
             log(f"{type_name}: błąd połączenia: {e}")
         log("Ponawiam za 3 s (naciśnij przycisk na Clicku, żeby go wybudzić)...")
@@ -282,7 +308,8 @@ async def main():
 
     if not args.tylko_log:
         log("Kliknij teraz w okno MyWhoosh, żeby klawisze do niego trafiały.")
-    await asyncio.gather(*(keep_connected(d, t, keys, args.surowe) for d, t in devices))
+    presses = PressFilter()
+    await asyncio.gather(*(keep_connected(d, t, keys, presses, args.surowe) for d, t in devices))
 
 
 if __name__ == "__main__":

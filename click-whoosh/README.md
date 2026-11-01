@@ -15,7 +15,7 @@ To pierwsza wersja testowa. Wersja na Androida będzie następnym krokiem.
 1. Zamknij aplikację Zwift i Zwift Companion, bo Click przyjmuje tylko jedno połączenie.
 2. Uruchom `start.bat` dwuklikiem.
 3. Naciśnij przycisk na obu częściach Clicka, żeby się wybudziły.
-4. Gdy pojawi się „połączony”, kliknij w okno MyWhoosh. Klawisze trafiają do okna, które jest na wierzchu.
+4. Gdy pojawi się „połączony”, możesz jeździć. Program sam znajduje okno MyWhoosh i wysyła do niego klawisze, nawet gdy nie jest na wierzchu.
 
 | Przycisk Clicka | Klawisz | MyWhoosh |
 |---|---|---|
@@ -32,6 +32,11 @@ Lewa część Clicka V2 jest „zablokowana” do czasu połączenia z oficjaln�
 1. Otwórz aplikację Zwift (nie Companion) i zaloguj się. Subskrypcja nie jest potrzebna.
 2. Na ekranie parowania połącz trenażer, potem Click V2.
 3. Odczekaj 10–30 sekund, zamknij Zwift całkowicie i uruchom `start.bat`.
+
+## Program pokazuje przyciski, ale MyWhoosh nie zmienia biegów
+
+1. Naciśnij **K** i **I** na klawiaturze w trakcie jazdy. Jeśli to też nic nie daje, sprawdź, czy jedziesz w trybie, w którym działają wirtualne biegi (nie ERG).
+2. Jeśli klawiatura działa, a Click nie: zamknij `start.bat`, kliknij go prawym przyciskiem i wybierz **Uruchom jako administrator**.
 
 ## Diagnoza
 

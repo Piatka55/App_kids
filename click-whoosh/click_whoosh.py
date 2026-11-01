@@ -130,23 +130,39 @@ def pressed_buttons(frame):
     return None
 
 
-# --- Wysyłanie klawiszy (Windows SendInput, kody skanowania) -----------------
+# --- Wysyłanie klawiszy (Windows) --------------------------------------------
 
-SCAN_CODES = {
-    "I": (0x17, False),
-    "K": (0x25, False),
-    "A": (0x1E, False),
-    "D": (0x20, False),
-    "LEFT": (0x4B, True),
-    "RIGHT": (0x4D, True),
-    "UP": (0x48, True),
-    "DOWN": (0x50, True),
+# klawisz -> (kod wirtualny VK, kod skanowania, klawisz rozszerzony)
+KEY_CODES = {
+    "I": (0x49, 0x17, False),
+    "K": (0x4B, 0x25, False),
+    "A": (0x41, 0x1E, False),
+    "D": (0x44, 0x20, False),
+    "LEFT": (0x25, 0x4B, True),
+    "RIGHT": (0x27, 0x4D, True),
+    "UP": (0x26, 0x48, True),
+    "DOWN": (0x28, 0x50, True),
 }
+
+MYWHOOSH_PROCESSES = ("mywhoosh.exe", "mywhooshhd.exe")
+
+# Gra czyta klawiaturę raz na klatkę, więc zbyt krótkie naciśnięcie może
+# przepaść. Tyle trzymamy klawisz.
+KEY_HOLD = 0.1  # sekundy
 
 
 class KeySender:
+    """Wysyła klawisze do MyWhoosh.
+
+    Gdy okno MyWhoosh jest na wierzchu, używa SendInput (jak prawdziwa
+    klawiatura). Gdy nie jest, wysyła komunikaty prosto do jego okna, więc nie
+    trzeba w nie klikać.
+    """
+
     def __init__(self, enabled):
         self.enabled = enabled and sys.platform == "win32"
+        self.window = None
+        self.warned = False
         if not self.enabled:
             return
         from ctypes import wintypes
@@ -163,10 +179,48 @@ class KeySender:
         class INPUT(ctypes.Structure):
             _fields_ = [("type", wintypes.DWORD), ("u", _U)]
 
+        self._wintypes = wintypes
         self._KEYBDINPUT, self._INPUT = KEYBDINPUT, INPUT
-        self._send = ctypes.windll.user32.SendInput
+        self._user32 = ctypes.windll.user32
+        self._kernel32 = ctypes.windll.kernel32
+        self._user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        self._user32.GetForegroundWindow.restype = wintypes.HWND
+        self._kernel32.OpenProcess.restype = wintypes.HANDLE
 
-    def _event(self, scan, extended, key_up):
+    def _process_name(self, hwnd):
+        pid = self._wintypes.DWORD()
+        self._user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        handle = self._kernel32.OpenProcess(0x1000, False, pid.value)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = self._wintypes.DWORD(len(buf))
+            if self._kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return buf.value.rsplit("\\", 1)[-1].lower()
+            return ""
+        finally:
+            self._kernel32.CloseHandle(handle)
+
+    def find_mywhoosh(self):
+        if self.window and self._user32.IsWindow(self.window):
+            return self.window
+        found = []
+        proc_type = ctypes.WINFUNCTYPE(ctypes.c_bool, self._wintypes.HWND, self._wintypes.LPARAM)
+
+        def check(hwnd, _):
+            if self._user32.IsWindowVisible(hwnd) and self._process_name(hwnd) in MYWHOOSH_PROCESSES:
+                found.append(hwnd)
+                return False
+            return True
+
+        self._user32.EnumWindows(proc_type(check), 0)
+        self.window = found[0] if found else None
+        if self.window:
+            log("Znalazłem okno MyWhoosh, klawisze pójdą prosto do niego.")
+        return self.window
+
+    def _send_input(self, scan, extended, key_up):
         flags = 0x0008  # KEYEVENTF_SCANCODE
         if extended:
             flags |= 0x0001
@@ -174,15 +228,38 @@ class KeySender:
             flags |= 0x0002
         inp = self._INPUT(type=1)  # INPUT_KEYBOARD
         inp.u.ki = self._KEYBDINPUT(0, scan, flags, 0, 0)
-        self._send(1, ctypes.byref(inp), ctypes.sizeof(inp))
+        if not self._user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp)) and not self.warned:
+            self.warned = True
+            log("Windows zablokował klawisz. Uruchom start.bat jako administrator.")
+
+    def _post(self, hwnd, vk, scan, extended, key_up):
+        lparam = 1 | (scan << 16)
+        if extended:
+            lparam |= 1 << 24
+        if key_up:
+            lparam |= (1 << 30) | (1 << 31)
+        msg = 0x0101 if key_up else 0x0100  # WM_KEYUP / WM_KEYDOWN
+        if not self._user32.PostMessageW(hwnd, msg, vk, lparam) and not self.warned:
+            self.warned = True
+            log("Windows zablokował klawisz. Uruchom start.bat jako administrator.")
+
+    def _key(self, key, key_up):
+        vk, scan, extended = KEY_CODES[key]
+        hwnd = self.find_mywhoosh()
+        if hwnd and self._user32.GetForegroundWindow() != hwnd:
+            self._post(hwnd, vk, scan, extended, key_up)
+        else:
+            self._send_input(scan, extended, key_up)
 
     def tap(self, key):
         if not self.enabled:
             return
-        scan, extended = SCAN_CODES[key]
-        self._event(scan, extended, False)
-        time.sleep(0.03)
-        self._event(scan, extended, True)
+        self._key(key, False)
+        try:
+            asyncio.get_running_loop().call_later(KEY_HOLD, self._key, key, True)
+        except RuntimeError:  # wywołanie spoza pętli asyncio
+            time.sleep(KEY_HOLD)
+            self._key(key, True)
 
 
 # --- Połączenie z Clickiem ---------------------------------------------------
@@ -306,8 +383,8 @@ async def main():
     for device, type_name in devices:
         log(f"Znaleziono: {type_name} [{device.address}] {device.name or ''}")
 
-    if not args.tylko_log:
-        log("Kliknij teraz w okno MyWhoosh, żeby klawisze do niego trafiały.")
+    if keys.enabled and not keys.find_mywhoosh():
+        log("Nie widzę okna MyWhoosh. Uruchom MyWhoosh albo kliknij w jego okno.")
     presses = PressFilter()
     await asyncio.gather(*(keep_connected(d, t, keys, presses, args.surowe) for d, t in devices))
 

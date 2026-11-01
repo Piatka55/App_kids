@@ -1,8 +1,8 @@
 """Click Whoosh: Zwift Click V2 -> klawisze MyWhoosh (Windows).
 
 Program łączy się z Clickiem przez Bluetooth LE, odczytuje wciśnięcia
-przycisków i wysyła do okna MyWhoosh naciśnięcia klawiszy (K = lżej/w górę,
-I = ciężej/w dół, zgodnie ze skrótami MyWhoosh).
+przycisków i wysyła do okna MyWhoosh naciśnięcia klawiszy (K = bieg w górę, czyli ciężej,
+I = bieg w dół, czyli lżej, zgodnie ze skrótami MyWhoosh).
 
 Uruchomienie:  python click_whoosh.py            (sterowanie MyWhoosh)
                python click_whoosh.py --tylko-log (tylko pokazuje przyciski)
@@ -62,9 +62,9 @@ BUTTON_BITS = {
 # Prawy puck działa zawsze, lewy dopiero po „odblokowaniu” w aplikacji Zwift,
 # dlatego zmiana biegów jest też pod Y i B.
 MAPPING = {
-    "plus": "K",    # bieg lżej / w górę w MyWhoosh
+    "plus": "K",    # bieg w górę (ciężej) w MyWhoosh
     "Y": "K",
-    "minus": "I",   # bieg ciężej / w dół w MyWhoosh
+    "minus": "I",   # bieg w dół (lżej) w MyWhoosh
     "B": "I",
     "lewo": "LEFT",
     "prawo": "RIGHT",

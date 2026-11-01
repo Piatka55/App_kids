@@ -19,8 +19,8 @@ To pierwsza wersja testowa. Wersja na Androida będzie następnym krokiem.
 
 | Przycisk Clicka | Klawisz | MyWhoosh |
 |---|---|---|
-| **+** albo **Y** (prawa część) | K | bieg w górę |
-| **−** albo **B** | I | bieg w dół |
+| **+** albo **Y** (prawa część) | K | bieg w górę (ciężej) |
+| **−** albo **B** | I | bieg w dół (lżej) |
 | krzyżak (lewa część) | strzałki | menu |
 
 Przypisania zmienisz w `click_whoosh.py` w słowniku `MAPPING`.
